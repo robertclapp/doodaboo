@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: #fafaf7;
+  color: #0a0a0a;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  font-family: inherit;
+}
+
+::selection {
+  background: #0a0a0a;
+  color: #c4f000;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #0a0a0a;
+  border: 2px solid #fafaf7;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #262626;
+}
+
+/* Grid background utility */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(10, 10, 10, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(10, 10, 10, 0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Disable hover styles on touch */
+@media (hover: none) {
+  .hover\:translate-x-0\.5:hover {
+    transform: none !important;
+  }
+}
+
+/* Motion */
+@keyframes wink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+.animate-wink { animation: wink 1.4s ease-in-out infinite; }
