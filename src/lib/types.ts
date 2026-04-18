@@ -55,6 +55,7 @@ export interface Project {
   updatedAt: string;
   icon?: string; // single char
   accent?: string; // hex
+  nextTaskNumber: number; // monotonic per-project counter
 }
 
 export interface Comment {

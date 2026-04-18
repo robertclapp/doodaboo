@@ -14,6 +14,18 @@ import {
 } from "./types";
 import { seedLabels, seedProjects, seedTasks, seedUsers } from "./seed";
 
+const EXPORT_VERSION = 1;
+
+export interface ExportPayload {
+  version: number;
+  exportedAt: string;
+  users: User[];
+  labels: Label[];
+  projects: Project[];
+  tasks: Task[];
+  currentUserId?: string;
+}
+
 interface StoreState {
   hydrated: boolean;
   currentUserId: string;
@@ -25,6 +37,8 @@ interface StoreState {
   // hydration
   setHydrated: (v: boolean) => void;
   resetToSeed: () => void;
+  exportState: () => ExportPayload;
+  importState: (payload: ExportPayload) => void;
 
   // user
   setCurrentUser: (id: string) => void;
@@ -73,6 +87,33 @@ export const useStore = create<StoreState>()(
           projects: seedProjects,
           tasks: seedTasks,
         }),
+      exportState: () => ({
+        version: EXPORT_VERSION,
+        exportedAt: new Date().toISOString(),
+        users: get().users,
+        labels: get().labels,
+        projects: get().projects,
+        tasks: get().tasks,
+        currentUserId: get().currentUserId,
+      }),
+      importState: (payload) => {
+        if (payload.version !== EXPORT_VERSION) {
+          throw new Error(
+            `Unsupported export version ${payload.version} (expected ${EXPORT_VERSION})`,
+          );
+        }
+        set({
+          users: payload.users,
+          labels: payload.labels,
+          projects: payload.projects,
+          tasks: payload.tasks,
+          currentUserId:
+            payload.currentUserId &&
+            payload.users.some((u) => u.id === payload.currentUserId)
+              ? payload.currentUserId
+              : payload.users[0]?.id ?? get().currentUserId,
+        });
+      },
 
       setCurrentUser: (id) => set({ currentUserId: id }),
       addUser: (u) => {
@@ -123,6 +164,7 @@ export const useStore = create<StoreState>()(
           accent: data.accent ?? "#ff5c1a",
           createdAt: nowIso(),
           updatedAt: nowIso(),
+          nextTaskNumber: 1,
         };
         set((s) => ({ projects: [project, ...s.projects] }));
         return project;
@@ -140,15 +182,15 @@ export const useStore = create<StoreState>()(
         })),
 
       createTask: (data) => {
-        const projectTasks = get().tasks.filter(
-          (t) => t.projectId === data.projectId,
-        );
-        const nextNumber =
-          projectTasks.reduce((m, t) => Math.max(m, t.number), 0) + 1;
+        const project = get().projects.find((p) => p.id === data.projectId);
+        if (!project) {
+          throw new Error(`Cannot create task: project ${data.projectId} not found`);
+        }
+        const number = project.nextTaskNumber;
         const task: Task = {
           id: `t_${nanoid(6)}`,
           projectId: data.projectId,
-          number: nextNumber,
+          number,
           type: data.type ?? "task",
           title: data.title,
           description: data.description ?? "",
@@ -170,7 +212,14 @@ export const useStore = create<StoreState>()(
             },
           ],
         };
-        set((s) => ({ tasks: [task, ...s.tasks] }));
+        set((s) => ({
+          tasks: [task, ...s.tasks],
+          projects: s.projects.map((p) =>
+            p.id === data.projectId
+              ? { ...p, nextTaskNumber: p.nextTaskNumber + 1 }
+              : p,
+          ),
+        }));
         return task;
       },
       updateTask: (id, patch) =>
@@ -256,6 +305,10 @@ export const useStore = create<StoreState>()(
     }),
     {
       name: "doodaboo-v1",
+      // Skip automatic rehydration so server and client both start from
+      // seed state; client explicitly rehydrates in <StoreHydration />
+      // after mount, avoiding React hydration mismatches.
+      skipHydration: true,
       storage: createJSONStorage(() =>
         typeof window === "undefined"
           ? (undefined as unknown as Storage)

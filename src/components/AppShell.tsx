@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Sidebar } from "./Sidebar";
 import { CommandPalette } from "./CommandPalette";
 import { NewTaskModal } from "./NewTaskModal";
+import { ShortcutsModal } from "./ShortcutsModal";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -11,12 +12,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [newTaskProjectId, setNewTaskProjectId] = useState<string | undefined>(
     undefined,
   );
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  const anyModalOpen = paletteOpen || newTaskOpen || shortcutsOpen;
+
+  const openNewTask = useCallback((projectId?: string) => {
+    setNewTaskProjectId(projectId);
+    setNewTaskOpen(true);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const isEditing =
-        target &&
+        !!target &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
           target.isContentEditable);
@@ -26,22 +35,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setPaletteOpen((v) => !v);
         return;
       }
-      if (!isEditing && e.key.toLowerCase() === "c" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+
+      if (isEditing || e.metaKey || e.ctrlKey || e.altKey) return;
+
+      if (e.key.toLowerCase() === "c" && !anyModalOpen) {
         e.preventDefault();
-        setNewTaskOpen(true);
+        openNewTask();
+        return;
+      }
+
+      if (e.key === "?" && !anyModalOpen) {
+        e.preventDefault();
+        setShortcutsOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [anyModalOpen, openNewTask]);
 
   return (
     <div className="flex min-h-screen">
       <Sidebar
-        onNewTask={() => {
-          setNewTaskProjectId(undefined);
-          setNewTaskOpen(true);
-        }}
+        onNewTask={() => openNewTask()}
+        onOpenShortcuts={() => setShortcutsOpen(true)}
       />
       <main className="flex-1 min-w-0 flex flex-col">{children}</main>
       <CommandPalette
@@ -49,14 +65,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         onClose={() => setPaletteOpen(false)}
         onNewTask={(projectId) => {
           setPaletteOpen(false);
-          setNewTaskProjectId(projectId);
-          setNewTaskOpen(true);
+          openNewTask(projectId);
+        }}
+        onOpenShortcuts={() => {
+          setPaletteOpen(false);
+          setShortcutsOpen(true);
         }}
       />
       <NewTaskModal
         open={newTaskOpen}
         onClose={() => setNewTaskOpen(false)}
         defaultProjectId={newTaskProjectId}
+      />
+      <ShortcutsModal
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
       />
     </div>
   );

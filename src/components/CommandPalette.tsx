@@ -7,8 +7,10 @@ import {
   FolderKanban,
   Home,
   Inbox,
+  Keyboard,
   ListTodo,
   Plus,
+  Settings,
   Tag,
   Users,
 } from "lucide-react";
@@ -28,10 +30,12 @@ export function CommandPalette({
   open,
   onClose,
   onNewTask,
+  onOpenShortcuts,
 }: {
   open: boolean;
   onClose: () => void;
   onNewTask: (projectId?: string) => void;
+  onOpenShortcuts: () => void;
 }) {
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
@@ -119,6 +123,24 @@ export function CommandPalette({
         },
       },
       {
+        id: "go_settings",
+        label: "Go to Settings",
+        group: "Navigate",
+        icon: <Settings size={12} />,
+        onSelect: () => {
+          router.push("/settings");
+          onClose();
+        },
+      },
+      {
+        id: "show_shortcuts",
+        label: "Show keyboard shortcuts",
+        hint: "?",
+        group: "Help",
+        icon: <Keyboard size={12} />,
+        onSelect: onOpenShortcuts,
+      },
+      {
         id: "new_project",
         label: "New project",
         group: "Create",
@@ -169,7 +191,7 @@ export function CommandPalette({
         (i.hint && i.hint.toLowerCase().includes(needle)) ||
         i.group.toLowerCase().includes(needle),
     );
-  }, [q, projects, tasks, router, onClose, onNewTask]);
+  }, [q, projects, tasks, router, onClose, onNewTask, onOpenShortcuts]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, CommandItem[]>();

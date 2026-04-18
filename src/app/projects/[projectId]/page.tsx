@@ -35,6 +35,7 @@ export default function ProjectDetailPage() {
   const [filterStatus, setFilterStatus] = useState<Status | "all">("all");
   const [filterPriority, setFilterPriority] = useState<Priority | "all">("all");
   const [filterAssignee, setFilterAssignee] = useState<string | "all">("all");
+  const [filterLabel, setFilterLabel] = useState<string | "all">("all");
   const [q, setQ] = useState("");
 
   const filtered = useMemo(() => {
@@ -42,10 +43,13 @@ export default function ProjectDetailPage() {
       (t) =>
         (filterStatus === "all" || t.status === filterStatus) &&
         (filterPriority === "all" || t.priority === filterPriority) &&
-        (filterAssignee === "all" || t.assigneeId === filterAssignee) &&
+        (filterAssignee === "all" ||
+          (filterAssignee === "" && !t.assigneeId) ||
+          t.assigneeId === filterAssignee) &&
+        (filterLabel === "all" || t.labelIds.includes(filterLabel)) &&
         (!q.trim() || t.title.toLowerCase().includes(q.toLowerCase())),
     );
-  }, [tasks, filterStatus, filterPriority, filterAssignee, q]);
+  }, [tasks, filterStatus, filterPriority, filterAssignee, filterLabel, q]);
 
   if (!hydrated) return null;
   if (!project) {
@@ -124,6 +128,7 @@ export default function ProjectDetailPage() {
                 onChange={setFilterAssignee}
                 memberIds={project.memberIds}
               />
+              <LabelFilter value={filterLabel} onChange={setFilterLabel} />
               <div className="relative ml-1">
                 <Search
                   size={11}
@@ -233,6 +238,30 @@ function PriorityFilter({
       {PRIORITIES.map((p) => (
         <option key={p.id} value={p.id}>
           {p.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function LabelFilter({
+  value,
+  onChange,
+}: {
+  value: string | "all";
+  onChange: (v: string | "all") => void;
+}) {
+  const labels = useStore((s) => s.labels);
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="h-7 px-2 border-[1.5px] border-ink bg-paper font-mono text-[10px] uppercase tracking-wider"
+    >
+      <option value="all">All Labels</option>
+      {labels.map((l) => (
+        <option key={l.id} value={l.id}>
+          {l.name}
         </option>
       ))}
     </select>

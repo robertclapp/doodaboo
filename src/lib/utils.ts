@@ -80,3 +80,18 @@ export function slug(n: string) {
     .replace(/[^A-Z0-9]/g, "")
     .slice(0, 4);
 }
+
+export type DueStatus = "overdue" | "today" | "soon" | "later" | "none";
+
+export function dueStatus(iso?: string, now = Date.now()): DueStatus {
+  if (!iso) return "none";
+  const due = new Date(iso).getTime();
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const todayStart = startOfToday.getTime();
+  const todayEnd = todayStart + 24 * 60 * 60 * 1000;
+  if (due < todayStart && now > due) return "overdue";
+  if (due >= todayStart && due < todayEnd) return "today";
+  if (due - now < 7 * 24 * 60 * 60 * 1000) return "soon";
+  return "later";
+}

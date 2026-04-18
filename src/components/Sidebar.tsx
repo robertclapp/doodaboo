@@ -16,7 +16,13 @@ import { cn } from "@/lib/utils";
 import { Avatar } from "./ui/Avatar";
 import { StatusIcon } from "./StatusIcon";
 
-export function Sidebar({ onNewTask }: { onNewTask: () => void }) {
+export function Sidebar({
+  onNewTask,
+  onOpenShortcuts,
+}: {
+  onNewTask: () => void;
+  onOpenShortcuts: () => void;
+}) {
   const pathname = usePathname();
   const projects = useStore((s) => s.projects);
   const tasks = useStore((s) => s.tasks);
@@ -163,18 +169,20 @@ export function Sidebar({ onNewTask }: { onNewTask: () => void }) {
         </Link>
       </div>
 
-      <div className="border-t-[1.5px] border-ink p-2 flex items-center justify-between">
-        <div className="font-mono text-[9px] uppercase tracking-widest text-ink/40">
-          cmd+k · palette
-        </div>
-        <div className="flex gap-0.5">
-          <kbd className="font-mono text-[9px] bg-ink text-paper px-1 py-0.5">
-            ⌘
-          </kbd>
-          <kbd className="font-mono text-[9px] bg-ink text-paper px-1 py-0.5">
-            K
-          </kbd>
-        </div>
+      <div className="border-t-[1.5px] border-ink p-2 flex items-center justify-between gap-2">
+        <Link
+          href="/settings"
+          className="font-mono text-[9px] uppercase tracking-widest text-ink/40 hover:text-ink"
+        >
+          settings
+        </Link>
+        <button
+          onClick={onOpenShortcuts}
+          className="font-mono text-[9px] uppercase tracking-widest text-ink/40 hover:text-ink"
+          title="Keyboard shortcuts (?)"
+        >
+          shortcuts ?
+        </button>
       </div>
     </aside>
   );

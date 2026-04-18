@@ -9,7 +9,8 @@ import { AssigneePicker } from "./pickers/AssigneePicker";
 import { StatusPicker } from "./pickers/StatusPicker";
 import { PriorityPicker } from "./pickers/PriorityPicker";
 import { LabelPicker } from "./pickers/LabelPicker";
-import { cn, formatDateShort, priorityRank } from "@/lib/utils";
+import { cn, priorityRank } from "@/lib/utils";
+import { DueBadge } from "./DueBadge";
 import { useMemo } from "react";
 
 export function TaskList({
@@ -172,9 +173,7 @@ function TaskListInner({
             )}
             {!showProject && <span />}
 
-            <span className="font-mono text-[10px] uppercase tracking-wider text-ink/50">
-              {formatDateShort(t.updatedAt)}
-            </span>
+            <DueBadge iso={t.dueDate} />
 
             <AssigneePicker
               value={t.assigneeId}
