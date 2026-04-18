@@ -10,7 +10,7 @@ import { PriorityPicker } from "@/components/pickers/PriorityPicker";
 import { AssigneePicker } from "@/components/pickers/AssigneePicker";
 import { useStore } from "@/lib/store";
 import { Priority, Status } from "@/lib/types";
-import { slug } from "@/lib/utils";
+import { localDateInputToIso, slug } from "@/lib/utils";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
@@ -62,7 +62,7 @@ export default function NewProjectPage() {
       priority,
       leadId,
       memberIds: Array.from(new Set([...(leadId ? [leadId] : []), ...memberIds])),
-      targetDate: targetDate ? new Date(targetDate).toISOString() : undefined,
+      targetDate: localDateInputToIso(targetDate),
       accent,
       icon: name.trim().charAt(0).toUpperCase() || "P",
     });

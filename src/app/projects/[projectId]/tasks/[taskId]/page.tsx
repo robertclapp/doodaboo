@@ -12,7 +12,12 @@ import { AssigneePicker } from "@/components/pickers/AssigneePicker";
 import { LabelPicker } from "@/components/pickers/LabelPicker";
 import { useStore } from "@/lib/store";
 import { Avatar } from "@/components/ui/Avatar";
-import { formatDateShort, timeAgo } from "@/lib/utils";
+import {
+  formatDateShort,
+  isoToLocalDateInput,
+  localDateInputToIso,
+  timeAgo,
+} from "@/lib/utils";
 import { ArrowLeft, Trash2 } from "lucide-react";
 
 export default function TaskDetailPage() {
@@ -43,7 +48,11 @@ export default function TaskDetailPage() {
   }, [task?.id, task?.title, task?.description]);
 
   if (!hydrated) return null;
-  if (!task || !project) {
+  // Guard: the taskId path segment must belong to the project in the URL.
+  // Otherwise a link like /projects/<A>/tasks/<task-from-B> would render B's
+  // data under A's header/back-link, producing a misleading view and letting
+  // edits leak across projects.
+  if (!task || !project || task.projectId !== project.id) {
     return (
       <div className="p-8 font-mono uppercase text-sm">
         Not found.{" "}
@@ -237,12 +246,10 @@ export default function TaskDetailPage() {
             <Row label="Due">
               <Input
                 type="date"
-                value={task.dueDate ? task.dueDate.slice(0, 10) : ""}
+                value={isoToLocalDateInput(task.dueDate)}
                 onChange={(e) =>
                   updateTask(task.id, {
-                    dueDate: e.target.value
-                      ? new Date(e.target.value).toISOString()
-                      : undefined,
+                    dueDate: localDateInputToIso(e.target.value),
                   })
                 }
                 className="h-7 text-xs"

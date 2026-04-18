@@ -95,3 +95,23 @@ export function dueStatus(iso?: string, now = Date.now()): DueStatus {
   if (due - now < 7 * 24 * 60 * 60 * 1000) return "soon";
   return "later";
 }
+
+// `<input type="date">` hands us a "YYYY-MM-DD" string that represents a
+// calendar day in the user's timezone. `new Date("YYYY-MM-DD")` parses as
+// UTC midnight, which shifts the calendar day for anyone west of UTC — so
+// we parse/format at local midnight instead.
+export function localDateInputToIso(value: string): string | undefined {
+  if (!value) return undefined;
+  const [y, m, d] = value.split("-").map(Number);
+  if (!y || !m || !d) return undefined;
+  return new Date(y, m - 1, d).toISOString();
+}
+
+export function isoToLocalDateInput(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
