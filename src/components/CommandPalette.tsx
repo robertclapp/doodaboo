@@ -11,6 +11,7 @@ import {
   ListTodo,
   Plus,
   Settings,
+  Sparkles,
   Tag,
   Users,
 } from "lucide-react";
@@ -43,6 +44,7 @@ export function CommandPalette({
   const router = useRouter();
   const projects = useStore((s) => s.projects);
   const tasks = useStore((s) => s.tasks);
+  const posts = useStore((s) => s.posts);
 
   useEffect(() => {
     if (open) {
@@ -150,6 +152,26 @@ export function CommandPalette({
           onClose();
         },
       },
+      {
+        id: "new_post",
+        label: "New post (virality predictor)",
+        group: "Create",
+        icon: <Sparkles size={12} />,
+        onSelect: () => {
+          router.push("/posts/new");
+          onClose();
+        },
+      },
+      {
+        id: "go_posts",
+        label: "Go to Posts",
+        group: "Navigate",
+        icon: <Sparkles size={12} />,
+        onSelect: () => {
+          router.push("/posts");
+          onClose();
+        },
+      },
       ...projects.map((p) => ({
         id: `proj_${p.id}`,
         label: `Open project · ${p.name}`,
@@ -182,6 +204,17 @@ export function CommandPalette({
           },
         };
       }),
+      ...posts.slice(0, 30).map((p) => ({
+        id: `post_${p.id}`,
+        label: p.title || "Untitled post",
+        hint: p.platform.replace("_", " "),
+        group: "Posts",
+        icon: <Sparkles size={12} />,
+        onSelect: () => {
+          router.push(`/posts/${p.id}`);
+          onClose();
+        },
+      })),
     ];
     if (!q.trim()) return out;
     const needle = q.toLowerCase();
@@ -191,7 +224,7 @@ export function CommandPalette({
         (i.hint && i.hint.toLowerCase().includes(needle)) ||
         i.group.toLowerCase().includes(needle),
     );
-  }, [q, projects, tasks, router, onClose, onNewTask, onOpenShortcuts]);
+  }, [q, projects, tasks, posts, router, onClose, onNewTask, onOpenShortcuts]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, CommandItem[]>();

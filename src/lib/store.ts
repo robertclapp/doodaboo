@@ -6,13 +6,21 @@ import { nanoid } from "nanoid";
 import {
   ActivityEntry,
   Comment,
+  EngagementSnapshot,
   Label,
+  Post,
   Project,
   Status,
   Task,
   User,
 } from "./types";
-import { seedLabels, seedProjects, seedTasks, seedUsers } from "./seed";
+import {
+  seedLabels,
+  seedPosts,
+  seedProjects,
+  seedTasks,
+  seedUsers,
+} from "./seed";
 
 const EXPORT_VERSION = 1;
 
@@ -23,6 +31,7 @@ export interface ExportPayload {
   labels: Label[];
   projects: Project[];
   tasks: Task[];
+  posts: Post[];
   currentUserId?: string;
 }
 
@@ -33,6 +42,7 @@ interface StoreState {
   labels: Label[];
   projects: Project[];
   tasks: Task[];
+  posts: Post[];
 
   // hydration
   setHydrated: (v: boolean) => void;
@@ -64,6 +74,16 @@ interface StoreState {
   deleteTask: (id: string) => void;
   moveTaskStatus: (id: string, status: Status) => void;
   addComment: (taskId: string, body: string) => Comment | undefined;
+
+  // posts
+  createPost: (data: Partial<Post> & Pick<Post, "title" | "platform">) => Post;
+  updatePost: (id: string, patch: Partial<Post>) => void;
+  deletePost: (id: string) => void;
+  addSnapshot: (
+    postId: string,
+    snapshot: Omit<EngagementSnapshot, "id" | "capturedAt">,
+  ) => EngagementSnapshot | undefined;
+  removeSnapshot: (postId: string, snapshotId: string) => void;
 }
 
 const nowIso = () => new Date().toISOString();
@@ -77,6 +97,7 @@ export const useStore = create<StoreState>()(
       labels: seedLabels,
       projects: seedProjects,
       tasks: seedTasks,
+      posts: seedPosts,
 
       setHydrated: (v) => set({ hydrated: v }),
       resetToSeed: () =>
@@ -86,6 +107,7 @@ export const useStore = create<StoreState>()(
           labels: seedLabels,
           projects: seedProjects,
           tasks: seedTasks,
+          posts: seedPosts,
         }),
       exportState: () => ({
         version: EXPORT_VERSION,
@@ -94,6 +116,7 @@ export const useStore = create<StoreState>()(
         labels: get().labels,
         projects: get().projects,
         tasks: get().tasks,
+        posts: get().posts,
         currentUserId: get().currentUserId,
       }),
       importState: (payload) => {
@@ -107,6 +130,7 @@ export const useStore = create<StoreState>()(
           labels: payload.labels,
           projects: payload.projects,
           tasks: payload.tasks,
+          posts: payload.posts ?? [],
           currentUserId:
             payload.currentUserId &&
             payload.users.some((u) => u.id === payload.currentUserId)
@@ -272,6 +296,89 @@ export const useStore = create<StoreState>()(
         set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
       moveTaskStatus: (id, status) =>
         get().updateTask(id, { status }),
+      createPost: (data) => {
+        const post: Post = {
+          id: `po_${nanoid(6)}`,
+          projectId: data.projectId,
+          title: data.title,
+          platform: data.platform,
+          status: data.status ?? "draft",
+          scheduledAt: data.scheduledAt,
+          postedAt: data.postedAt,
+          threshold: data.threshold ?? {
+            metric: "views",
+            value: 100000,
+            window: "7d",
+          },
+          snapshots: data.snapshots ?? [],
+          content: data.content ?? {
+            hook: "",
+            caption: "",
+            hashtags: [],
+            transcript: "",
+            format: "video",
+            durationSec: undefined,
+            hasTrendingAudio: false,
+          },
+          context: data.context ?? {
+            audienceSize: 1000,
+            accountAvgViews: 200,
+            postingHour: 12,
+            dayOfWeek: 2,
+            topicCategory: "general",
+            novelty: 3,
+            emotion: 3,
+            trendMatch: 3,
+            sentiment: "neutral",
+          },
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        };
+        set((s) => ({ posts: [post, ...s.posts] }));
+        return post;
+      },
+      updatePost: (id, patch) =>
+        set((s) => ({
+          posts: s.posts.map((p) =>
+            p.id === id ? { ...p, ...patch, updatedAt: nowIso() } : p,
+          ),
+        })),
+      deletePost: (id) =>
+        set((s) => ({ posts: s.posts.filter((p) => p.id !== id) })),
+      addSnapshot: (postId, snapshot) => {
+        const snap: EngagementSnapshot = {
+          id: nanoid(6),
+          capturedAt: nowIso(),
+          ...snapshot,
+        };
+        set((s) => ({
+          posts: s.posts.map((p) =>
+            p.id === postId
+              ? {
+                  ...p,
+                  snapshots: [...p.snapshots, snap].sort(
+                    (a, b) => a.atMinutes - b.atMinutes,
+                  ),
+                  updatedAt: nowIso(),
+                }
+              : p,
+          ),
+        }));
+        return snap;
+      },
+      removeSnapshot: (postId, snapshotId) =>
+        set((s) => ({
+          posts: s.posts.map((p) =>
+            p.id === postId
+              ? {
+                  ...p,
+                  snapshots: p.snapshots.filter((x) => x.id !== snapshotId),
+                  updatedAt: nowIso(),
+                }
+              : p,
+          ),
+        })),
+
       addComment: (taskId, body) => {
         const clean = body.trim();
         if (!clean) return undefined;
@@ -320,6 +427,7 @@ export const useStore = create<StoreState>()(
         labels: s.labels,
         projects: s.projects,
         tasks: s.tasks,
+        posts: s.posts,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHydrated(true);

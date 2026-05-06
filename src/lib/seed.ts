@@ -1,4 +1,13 @@
-import { Label, Project, Task, User } from "./types";
+import {
+  EngagementSnapshot,
+  Label,
+  Platform,
+  Post,
+  PostFormat,
+  Project,
+  Task,
+  User,
+} from "./types";
 
 // Fixed epoch — using a literal timestamp keeps seed deterministic so
 // server-rendered and client-rendered initial state match exactly. Without this,
@@ -99,6 +108,181 @@ export const seedTasks: Task[] = [
   mkTask("p_infra", 2, "task", "Error tracking: wire Sentry", "backlog", "high", "u_rob", ["l_infra"], 3, 14),
   mkTask("p_infra", 3, "issue", "Preview deploys flake", "in_progress", "urgent", "u_leo", ["l_infra", "l_bug"], 2, -1),
 ];
+
+export const seedPosts: Post[] = [
+  mkPost({
+    id: "po_brutalist_drop",
+    projectId: "p_web",
+    title: "Brutalist drop teaser",
+    platform: "tiktok",
+    format: "video",
+    hook: "Why every SaaS app looks the same in 2026",
+    caption: "Three reasons design got boring — and how brutalism breaks the loop. Comment your favorite anti-pattern.",
+    hashtags: ["design", "brutalism", "saas", "indiehacker"],
+    durationSec: 22,
+    audienceSize: 14000,
+    accountAvgViews: 4200,
+    novelty: 4,
+    emotion: 4,
+    trendMatch: 4,
+    sentiment: "controversial",
+    hour: 20,
+    day: 3,
+    status: "live",
+    snapshots: [
+      snap(5, 12000, 11800, 920, 180, 410, 220, 12, 64),
+      snap(15, 38000, 37000, 3100, 540, 1450, 760, 13, 58),
+      snap(60, 124000, 121000, 11200, 1980, 6100, 2950, 13, 56),
+    ],
+  }),
+  mkPost({
+    id: "po_launch_post",
+    projectId: "p_app",
+    title: "v0.2 launch post",
+    platform: "x",
+    format: "text",
+    hook: "We rebuilt the project tool we always wanted.",
+    caption: "Brutalist UI, kanban + list, command palette, multi-platform virality predictor. All offline. Free demo:",
+    hashtags: ["launch"],
+    audienceSize: 8200,
+    accountAvgViews: 1200,
+    novelty: 4,
+    emotion: 3,
+    trendMatch: 3,
+    sentiment: "positive",
+    hour: 9,
+    day: 2,
+    status: "scheduled",
+    snapshots: [],
+  }),
+  mkPost({
+    id: "po_career_essay",
+    title: "Why I left the AI lab",
+    platform: "linkedin",
+    format: "text",
+    hook: "Last month I left a research role at a top lab. Here's what nobody tells you.",
+    caption:
+      "Four lessons from inside a frontier lab — and what I'd do differently if I started over today. Long read, but it's the post I wish I'd had three years ago.",
+    hashtags: ["careers", "ai", "research"],
+    audienceSize: 23000,
+    accountAvgViews: 6500,
+    novelty: 3,
+    emotion: 4,
+    trendMatch: 3,
+    sentiment: "positive",
+    hour: 8,
+    day: 2,
+    status: "draft",
+    snapshots: [],
+  }),
+  mkPost({
+    id: "po_carousel_breakdown",
+    title: "Carousel: 5 brutalist patterns",
+    platform: "instagram_feed",
+    format: "carousel",
+    hook: "5 brutalist UI patterns that don't suck",
+    caption: "Save this for your next redesign. Which one are you stealing first?",
+    hashtags: ["uidesign", "brutalism", "designsystems", "ui", "uxdesign", "frontend"],
+    audienceSize: 11200,
+    accountAvgViews: 3000,
+    novelty: 4,
+    emotion: 3,
+    trendMatch: 4,
+    sentiment: "positive",
+    hour: 12,
+    day: 4,
+    status: "live",
+    snapshots: [
+      snap(5, 4800, 4200, 380, 32, 18, 240, undefined, undefined),
+      snap(30, 22000, 18000, 2100, 220, 240, 1900, undefined, undefined),
+    ],
+  }),
+];
+
+function mkPost(args: {
+  id: string;
+  projectId?: string;
+  title: string;
+  platform: Platform;
+  format: PostFormat;
+  hook: string;
+  caption: string;
+  hashtags: string[];
+  durationSec?: number;
+  audienceSize: number;
+  accountAvgViews: number;
+  novelty: 1 | 2 | 3 | 4 | 5;
+  emotion: 1 | 2 | 3 | 4 | 5;
+  trendMatch: 1 | 2 | 3 | 4 | 5;
+  sentiment: "negative" | "neutral" | "positive" | "controversial";
+  hour: number;
+  day: number;
+  status: Post["status"];
+  snapshots: EngagementSnapshot[];
+}): Post {
+  const created = offset(-2);
+  return {
+    id: args.id,
+    projectId: args.projectId,
+    title: args.title,
+    platform: args.platform,
+    status: args.status,
+    scheduledAt: args.status === "scheduled" ? offset(1) : undefined,
+    postedAt: args.status === "live" ? offset(-1) : undefined,
+    threshold: { metric: "views", value: 100000, window: "7d" },
+    snapshots: args.snapshots,
+    content: {
+      hook: args.hook,
+      caption: args.caption,
+      hashtags: args.hashtags,
+      transcript: "",
+      format: args.format,
+      durationSec: args.durationSec,
+      hasTrendingAudio:
+        args.format === "video" &&
+        (args.platform === "tiktok" || args.platform === "reels"),
+    },
+    context: {
+      audienceSize: args.audienceSize,
+      accountAvgViews: args.accountAvgViews,
+      postingHour: args.hour,
+      dayOfWeek: args.day,
+      topicCategory: "general",
+      novelty: args.novelty,
+      emotion: args.emotion,
+      trendMatch: args.trendMatch,
+      sentiment: args.sentiment,
+    },
+    createdAt: created,
+    updatedAt: created,
+  };
+}
+
+function snap(
+  atMinutes: number,
+  impressions: number,
+  views: number,
+  likes: number,
+  comments: number,
+  shares: number,
+  saves: number,
+  watchTimeAvgSec?: number,
+  retentionPct?: number,
+): EngagementSnapshot {
+  return {
+    id: `s_${atMinutes}_${impressions}`,
+    capturedAt: offset(-1),
+    atMinutes,
+    impressions,
+    views,
+    likes,
+    comments,
+    shares,
+    saves,
+    watchTimeAvgSec,
+    retentionPct,
+  };
+}
 
 function mkTask(
   projectId: string,

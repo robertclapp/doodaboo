@@ -10,6 +10,7 @@ import {
   Users,
   Plus,
   Tag,
+  Sparkles,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -119,6 +120,12 @@ export function Sidebar({
           href="/labels"
         >
           <Tag size={12} /> Labels
+        </Link>
+        <Link
+          className={item(pathname.startsWith("/posts"))}
+          href="/posts"
+        >
+          <Sparkles size={12} /> Posts
         </Link>
       </nav>
 

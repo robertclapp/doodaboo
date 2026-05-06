@@ -9,12 +9,15 @@ import { Avatar, AvatarStack } from "@/components/ui/Avatar";
 import { STATUSES } from "@/lib/types";
 import { formatDateShort, timeAgo } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
-import { ArrowRight, Plus } from "lucide-react";
+import { ArrowRight, Plus, Sparkles } from "lucide-react";
+import { PlatformIcon } from "@/components/posts/PlatformIcon";
+import { describeBand, scoreIntrinsic, scoreLive } from "@/lib/virality";
 
 export default function HomePage() {
   const projects = useStore((s) => s.projects);
   const tasks = useStore((s) => s.tasks);
   const users = useStore((s) => s.users);
+  const posts = useStore((s) => s.posts);
   const currentUser = useStore((s) =>
     s.users.find((u) => u.id === s.currentUserId),
   );
@@ -182,6 +185,64 @@ export default function HomePage() {
                 </li>
               );
             })}
+          </ul>
+        </section>
+
+        <section className="col-span-12 border-[1.5px] border-ink bg-paper">
+          <div className="h-9 border-b-[1.5px] border-ink px-3 flex items-center justify-between">
+            <div className="font-mono text-[11px] uppercase tracking-widest font-bold">
+              <Sparkles size={12} className="inline-block mr-1 -translate-y-px" />
+              Top posts · virality predictor
+            </div>
+            <Link
+              href="/posts"
+              className="font-mono text-[10px] uppercase tracking-widest text-ink/50 hover:text-ink"
+            >
+              all posts
+            </Link>
+          </div>
+          <ul>
+            {posts
+              .map((p) => {
+                const live = scoreLive(p);
+                const score = live ?? scoreIntrinsic(p);
+                return { p, score };
+              })
+              .sort((a, b) => b.score.value - a.score.value)
+              .slice(0, 5)
+              .map(({ p, score }) => (
+                <li
+                  key={p.id}
+                  className="grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-2 px-3 h-9 border-b-[1.5px] border-ink/10 last:border-b-0"
+                >
+                  <PlatformIcon platform={p.platform} size={20} />
+                  <span
+                    className="inline-flex items-center justify-center w-10 h-6 border-[1.5px] border-ink font-mono text-xs font-bold tabular-nums"
+                    style={{ backgroundColor: describeBand(score.band).tone }}
+                  >
+                    {score.value.toFixed(0)}
+                  </span>
+                  <Link
+                    href={`/posts/${p.id}`}
+                    className="truncate text-sm hover:underline"
+                  >
+                    {p.title || "Untitled post"}
+                  </Link>
+                  <span className="font-mono text-[10px] uppercase tracking-widest text-ink/50 hidden md:inline">
+                    {describeBand(score.band).label}
+                  </span>
+                  <span className="font-mono text-[10px] uppercase tracking-widest text-ink/50">
+                    {p.snapshots.length > 0
+                      ? `${p.snapshots.length} snapshots`
+                      : "pre-publish"}
+                  </span>
+                </li>
+              ))}
+            {posts.length === 0 && (
+              <li className="px-3 py-6 text-xs text-ink/50 font-mono uppercase tracking-widest">
+                Draft a post to see virality predictions.
+              </li>
+            )}
           </ul>
         </section>
 
