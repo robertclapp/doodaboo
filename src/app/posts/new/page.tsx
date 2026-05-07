@@ -7,9 +7,11 @@ import { ArrowLeft } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { PostComposer } from "@/components/posts/PostComposer";
+import { Recommendations } from "@/components/posts/Recommendations";
 import { useStore } from "@/lib/store";
 import { useHydrated } from "@/lib/hooks";
 import { Platform, Post, PostStatus } from "@/lib/types";
+import { recommend } from "@/lib/virality";
 
 export default function NewPostPage() {
   const hydrated = useHydrated();
@@ -94,7 +96,11 @@ export default function NewPostPage() {
           ))}
         </select>
       </div>
-      <PostComposer draft={draft} onChange={change} />
+      <PostComposer
+        draft={draft}
+        onChange={change}
+        rightSlot={<Recommendations items={recommend(draft)} />}
+      />
     </>
   );
 }

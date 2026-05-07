@@ -79,6 +79,7 @@ interface StoreState {
   createPost: (data: Partial<Post> & Pick<Post, "title" | "platform">) => Post;
   updatePost: (id: string, patch: Partial<Post>) => void;
   deletePost: (id: string) => void;
+  duplicatePost: (id: string, opts?: { titleSuffix?: string }) => Post | undefined;
   addSnapshot: (
     postId: string,
     snapshot: Omit<EngagementSnapshot, "id" | "capturedAt">,
@@ -345,6 +346,24 @@ export const useStore = create<StoreState>()(
         })),
       deletePost: (id) =>
         set((s) => ({ posts: s.posts.filter((p) => p.id !== id) })),
+      duplicatePost: (id, opts) => {
+        const original = get().posts.find((p) => p.id === id);
+        if (!original) return undefined;
+        const suffix = opts?.titleSuffix ?? " (variant)";
+        const copy: Post = {
+          ...original,
+          id: `po_${nanoid(6)}`,
+          title: `${original.title}${suffix}`.trim(),
+          status: "draft",
+          scheduledAt: undefined,
+          postedAt: undefined,
+          snapshots: [],
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        };
+        set((s) => ({ posts: [copy, ...s.posts] }));
+        return copy;
+      },
       addSnapshot: (postId, snapshot) => {
         const snap: EngagementSnapshot = {
           id: nanoid(6),

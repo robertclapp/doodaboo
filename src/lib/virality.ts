@@ -504,3 +504,199 @@ export function describeBand(band: ScoreBand): { label: string; tone: string } {
     case "rocket": return { label: "Rocket", tone: "#c4f000" };
   }
 }
+
+// ── Recommendations ─────────────────────────────────────────────────────────
+
+export interface Recommendation {
+  factorId: string;
+  label: string;
+  message: string;
+  potentialGain: number; // estimated score points if recommendation applied
+}
+
+/**
+ * Turn a score's weakest factors into actionable, platform-aware suggestions.
+ * Only intrinsic factors are recommendable (live engagement isn't something
+ * you can edit retroactively). Sorted by potential gain, capped at `max`.
+ */
+export function recommend(post: Post, max = 4): Recommendation[] {
+  const score = scoreIntrinsic(post);
+  const profile = PROFILES[post.platform];
+  const out: Recommendation[] = [];
+
+  for (const f of score.factors) {
+    if (f.raw >= 0.85) continue; // already strong, ignore
+    const headroom = (1 - f.raw) * f.weight * 100;
+    if (headroom < 1.5) continue; // not enough upside to bother
+    const message = messageFor(f.id, post, profile);
+    if (!message) continue;
+    out.push({
+      factorId: f.id,
+      label: f.label,
+      message,
+      potentialGain: round(headroom),
+    });
+  }
+
+  return out.sort((a, b) => b.potentialGain - a.potentialGain).slice(0, max);
+}
+
+function messageFor(
+  factorId: string,
+  post: Post,
+  profile: PlatformProfile,
+): string | undefined {
+  const c = post.content;
+  const ctx = post.context;
+  switch (factorId) {
+    case "hook": {
+      const words = c.hook.trim().split(/\s+/).filter(Boolean).length;
+      if (words === 0) return "Add a hook — first line carries the post.";
+      if (words < 4) return `Hook is ${words} words; aim for 4–8 with a verb or question.`;
+      if (words > 12) return `Hook is ${words} words; tighten to under 10.`;
+      return "Add a number, question, or contrast to strengthen the hook.";
+    }
+    case "caption": {
+      const len = c.caption.trim().length;
+      const target = profile.captionSweet.ideal;
+      if (len === 0) return `Caption is empty; ${labelFor(post.platform)} performs best near ${target} chars.`;
+      const off = len - target;
+      if (Math.abs(off) < profile.captionSweet.tolerance / 2) return undefined;
+      return off < 0
+        ? `Caption is ${len} chars; push toward ~${target} for ${labelFor(post.platform)}.`
+        : `Caption is ${len} chars; trim toward ~${target} for ${labelFor(post.platform)}.`;
+    }
+    case "hashtags": {
+      const target = profile.hashtagsSweet.ideal;
+      const diff = c.hashtags.length - target;
+      if (diff === 0) return undefined;
+      return diff < 0
+        ? `Add ${-diff} more hashtag${-diff === 1 ? "" : "s"} (target ~${target}).`
+        : `Trim ${diff} hashtag${diff === 1 ? "" : "s"} (target ~${target}).`;
+    }
+    case "format": {
+      const best = bestFormat(profile.formatPreference) as PostFormat;
+      if (c.format === best) return undefined;
+      return `${labelFor(post.platform)} rewards ${best} most; consider switching from ${c.format}.`;
+    }
+    case "duration": {
+      const t = profile.videoTargetSec;
+      if (!t || c.format !== "video" && c.format !== "live") return undefined;
+      if (c.durationSec == null) return `Set the video duration — target ${t.ideal}s.`;
+      if (c.durationSec < t.min) return `${c.durationSec}s is too short; aim for ${t.ideal}s.`;
+      if (c.durationSec > t.max) return `${c.durationSec}s is long for this platform; target ${t.ideal}s.`;
+      const off = Math.abs(c.durationSec - t.ideal);
+      if (off > 8) return `Trim toward ${t.ideal}s — current ${c.durationSec}s is off-target.`;
+      return undefined;
+    }
+    case "novelty":
+      return ctx.novelty <= 2
+        ? "Novelty is low — re-angle the hook or take a contrarian stance."
+        : ctx.novelty === 3
+          ? "Bump novelty: lead with what's genuinely new here."
+          : undefined;
+    case "emotion":
+      return ctx.emotion <= 2
+        ? "Inject more emotional charge — surprise, awe, or stakes."
+        : ctx.emotion === 3
+          ? "Push the emotional payoff one notch harder."
+          : undefined;
+    case "trendMatch":
+      return ctx.trendMatch <= 2
+        ? "Tie the post to a current trend cluster — search the platform first."
+        : undefined;
+    case "trendingAudio":
+      if (post.platform !== "tiktok" && post.platform !== "reels") return undefined;
+      return c.hasTrendingAudio
+        ? undefined
+        : "Layer a currently trending audio for an algorithmic boost.";
+    case "postingTime": {
+      const peakHrs = profile.peakHours.join(", ");
+      const peakDays = profile.peakDays
+        .map((d) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d])
+        .join("/");
+      const hourOK = profile.peakHours.includes(ctx.postingHour);
+      const dayOK = profile.peakDays.includes(ctx.dayOfWeek);
+      if (hourOK && dayOK) return undefined;
+      if (!hourOK && !dayOK) return `Move to a peak window: ${peakDays} at ${peakHrs}.`;
+      if (!hourOK) return `Shift posting hour into the peak window: ${peakHrs}.`;
+      return `Shift to a peak day for ${labelFor(post.platform)}: ${peakDays}.`;
+    }
+    case "baseline":
+      if (ctx.audienceSize <= 0) return "Set audience size to calibrate the baseline.";
+      if (ctx.accountAvgViews <= 0) return "Add recent average views — virality is relative to baseline.";
+      return undefined;
+    case "sentiment":
+      return ctx.sentiment === "neutral"
+        ? "Strong-sentiment posts outperform neutral ones — pick a clear stance."
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+// ── Viral threshold projection ──────────────────────────────────────────────
+
+export interface ViralProjection {
+  metric: "views" | "shares" | "engagement_rate";
+  threshold: number;
+  windowMinutes: number;
+  projected: number; // projected metric value at end of window
+  probability: number; // 0..1
+  basisMinutes: number; // how much data we have
+}
+
+const WINDOW_MINUTES: Record<"24h" | "7d" | "30d", number> = {
+  "24h": 24 * 60,
+  "7d": 7 * 24 * 60,
+  "30d": 30 * 24 * 60,
+};
+
+/**
+ * Project whether the post will hit its threshold by the end of its window,
+ * using a simple log-linear extrapolation: viral content typically follows a
+ * concave curve where most growth happens early. We fit `value = A * log(t+1)`
+ * to the latest snapshots and extrapolate forward.
+ */
+export function projectThreshold(post: Post): ViralProjection | undefined {
+  const win = WINDOW_MINUTES[post.threshold.window];
+  if (post.snapshots.length === 0) return undefined;
+  const sorted = [...post.snapshots].sort((a, b) => a.atMinutes - b.atMinutes);
+  const latest = sorted[sorted.length - 1];
+
+  let metricNow: number;
+  switch (post.threshold.metric) {
+    case "views":
+      metricNow = latest.views || latest.impressions;
+      break;
+    case "shares":
+      metricNow = latest.shares;
+      break;
+    case "engagement_rate": {
+      const imp = Math.max(latest.impressions, latest.views, 1);
+      metricNow = (latest.likes + latest.comments + latest.shares) / imp;
+      break;
+    }
+  }
+
+  // Log-linear extrapolation: scale current value by ratio of log(win)/log(t).
+  const t = Math.max(latest.atMinutes, 1);
+  const factor = Math.log(win + 1) / Math.log(t + 1);
+  const projected = metricNow * factor;
+
+  const ratio = post.threshold.value > 0 ? projected / post.threshold.value : 0;
+  const probability = clamp(sigmoid((ratio - 1) * 1.5));
+
+  return {
+    metric: post.threshold.metric,
+    threshold: post.threshold.value,
+    windowMinutes: win,
+    projected,
+    probability,
+    basisMinutes: latest.atMinutes,
+  };
+}
+
+function sigmoid(x: number): number {
+  return 1 / (1 + Math.exp(-x));
+}
