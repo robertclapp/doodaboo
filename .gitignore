@@ -12,3 +12,4 @@ tsconfig.tsbuildinfo
 playwright-report
 test-results
 .playwright-cache
+playwright-results.json

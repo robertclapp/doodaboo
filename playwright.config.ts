@@ -16,7 +16,9 @@ export default defineConfig({
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
   workers: isCI ? 2 : undefined,
-  reporter: isCI ? [["github"], ["list"]] : "list",
+  reporter: isCI
+    ? [["github"], ["list"], ["json", { outputFile: "playwright-results.json" }]]
+    : "list",
 
   use: {
     baseURL: BASE_URL,
