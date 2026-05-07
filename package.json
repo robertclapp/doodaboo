@@ -12,6 +12,10 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,md,json}\"",
     "typecheck": "tsc --noEmit",
     "test": "node --test --import tsx src/lib/virality.test.ts",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium",
+    "e2e:ui": "playwright test --ui",
+    "e2e:report": "playwright show-report",
     "verify": "npm run typecheck && npm run lint && npm test"
   },
   "dependencies": {
@@ -24,6 +28,7 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

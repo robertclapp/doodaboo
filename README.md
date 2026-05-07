@@ -57,6 +57,33 @@ npm run dev
 | `npm run lint` | `next lint` (ESLint 8). |
 | `npm run format` | Prettier write across `src/`. |
 | `npm run verify` | Typecheck + lint + tests in one shot. |
+| `npm run e2e` | Playwright E2E suite (auto-spins a `next start` server). |
+| `npm run e2e:install` | One-time browser binary install. |
+| `npm run e2e:ui` | Open the Playwright UI runner. |
+| `npm run e2e:report` | Open the last HTML report. |
+
+### End-to-end tests
+
+The Playwright suite under `e2e/` covers the critical paths:
+
+- Dashboard + sidebar navigation, Cmd+K command palette, `?` shortcuts
+  overlay, light/dark theme switch.
+- Project create flow, `c`-shortcut issue creation inside a project, kanban
+  board column rendering.
+- Posts list, live intrinsic-score updates as the composer changes, Hook
+  Lab variant generation + draft spawning, Compare view, Insights page.
+- Playbook library + detail, apply-playbook modal preview.
+
+Each spec resets `localStorage` in `beforeEach` so the seed workspace is
+always the starting state. The default config runs against a production
+build (`next start`); set `E2E_BASE_URL` to point at any other URL to run
+against an existing dev server or preview deployment.
+
+```bash
+npm run e2e:install   # first time only
+npm run build         # produce the build the suite runs against
+npm run e2e
+```
 
 ## Deploying to Vercel
 
