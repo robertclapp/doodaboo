@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
+  BarChart3,
+  BookOpen,
+  Columns2,
   FolderKanban,
   Home,
   Inbox,
@@ -169,6 +172,36 @@ export function CommandPalette({
         icon: <Sparkles size={12} />,
         onSelect: () => {
           router.push("/posts");
+          onClose();
+        },
+      },
+      {
+        id: "go_insights",
+        label: "Go to Posts Insights",
+        group: "Navigate",
+        icon: <BarChart3 size={12} />,
+        onSelect: () => {
+          router.push("/posts/insights");
+          onClose();
+        },
+      },
+      {
+        id: "go_compare",
+        label: "Compare posts",
+        group: "Navigate",
+        icon: <Columns2 size={12} />,
+        onSelect: () => {
+          router.push("/posts/compare");
+          onClose();
+        },
+      },
+      {
+        id: "go_playbooks",
+        label: "Go to Playbooks",
+        group: "Navigate",
+        icon: <BookOpen size={12} />,
+        onSelect: () => {
+          router.push("/playbooks");
           onClose();
         },
       },

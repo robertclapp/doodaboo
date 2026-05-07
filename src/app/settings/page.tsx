@@ -1,13 +1,23 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Download, RotateCcw, Upload } from "lucide-react";
+import {
+  Download,
+  Monitor,
+  Moon,
+  RotateCcw,
+  Sun,
+  Upload,
+} from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { useStore } from "@/lib/store";
+import { Theme } from "@/lib/store";
 
 export default function SettingsPage() {
   const hydrated = useStore((s) => s.hydrated);
+  const theme = useStore((s) => s.theme);
+  const setTheme = useStore((s) => s.setTheme);
   const resetToSeed = useStore((s) => s.resetToSeed);
   const exportState = useStore((s) => s.exportState);
   const importState = useStore((s) => s.importState);
@@ -86,6 +96,36 @@ export default function SettingsPage() {
             <Stat label="Issues" value={tasks.length} />
             <Stat label="Members" value={users.length} />
             <Stat label="Labels" value={labels.length} />
+          </div>
+        </section>
+
+        <section className="col-span-12 border-[1.5px] border-ink bg-paper">
+          <Header>Appearance</Header>
+          <div className="p-4 flex items-center gap-3 flex-wrap">
+            <ThemeOption
+              label="Light"
+              value="light"
+              current={theme}
+              icon={<Sun size={14} />}
+              onSelect={setTheme}
+            />
+            <ThemeOption
+              label="Dark"
+              value="dark"
+              current={theme}
+              icon={<Moon size={14} />}
+              onSelect={setTheme}
+            />
+            <ThemeOption
+              label="System"
+              value="system"
+              current={theme}
+              icon={<Monitor size={14} />}
+              onSelect={setTheme}
+            />
+            <div className="ml-auto font-mono text-[10px] uppercase tracking-widest text-ink/50">
+              Color tokens swap via CSS variables — no reload needed.
+            </div>
           </div>
         </section>
 
@@ -175,6 +215,36 @@ function Header({ children }: { children: React.ReactNode }) {
     <div className="h-9 border-b-[1.5px] border-ink px-3 flex items-center font-mono text-[11px] uppercase tracking-widest font-bold">
       {children}
     </div>
+  );
+}
+
+function ThemeOption({
+  label,
+  value,
+  current,
+  icon,
+  onSelect,
+}: {
+  label: string;
+  value: Theme;
+  current: Theme;
+  icon: React.ReactNode;
+  onSelect: (t: Theme) => void;
+}) {
+  const active = value === current;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(value)}
+      className={`inline-flex items-center gap-2 h-9 px-3 border-[1.5px] border-ink font-mono text-[11px] uppercase tracking-widest transition-all ${
+        active
+          ? "bg-ink text-paper -translate-y-[1px] shadow-brutal-sm"
+          : "bg-paper hover:-translate-y-[1px] hover:shadow-brutal-sm"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 

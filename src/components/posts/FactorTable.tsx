@@ -55,7 +55,7 @@ function FactorRow({ factor }: { factor: ScoreFactor }) {
         {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
         <span
           className="inline-block w-2 h-2"
-          style={{ backgroundColor: tone, boxShadow: "inset 0 0 0 1.5px #0a0a0a" }}
+          style={{ backgroundColor: tone, boxShadow: "inset 0 0 0 1.5px var(--ink-hex)" }}
         />
         <span className="text-sm truncate">
           {factor.label}

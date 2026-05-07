@@ -21,11 +21,11 @@ export function PriorityIcon({
           width="12"
           height="12"
           fill={color}
-          stroke="#0a0a0a"
+          stroke="currentColor"
           strokeWidth="1.5"
         />
-        <rect x="6.25" y="3" width="1.5" height="5" fill="#fafaf7" />
-        <rect x="6.25" y="9" width="1.5" height="1.5" fill="#fafaf7" />
+        <rect x="6.25" y="3" width="1.5" height="5" fill="var(--paper-hex)" />
+        <rect x="6.25" y="9" width="1.5" height="1.5" fill="var(--paper-hex)" />
       </svg>
     );
   }
@@ -38,7 +38,7 @@ export function PriorityIcon({
           y1="7"
           x2="12"
           y2="7"
-          stroke="#0a0a0a"
+          stroke="currentColor"
           strokeWidth="1.5"
           strokeDasharray="2 2"
         />
@@ -68,8 +68,8 @@ export function PriorityIcon({
           y={13 - d.h}
           width="3"
           height={d.h}
-          fill={active[i] ? color : "#fafaf7"}
-          stroke="#0a0a0a"
+          fill={active[i] ? color : "var(--paper-hex)"}
+          stroke="currentColor"
           strokeWidth="1.5"
         />
       ))}

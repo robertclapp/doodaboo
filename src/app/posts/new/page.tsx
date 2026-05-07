@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { PostComposer } from "@/components/posts/PostComposer";
 import { Recommendations } from "@/components/posts/Recommendations";
+import { PlaybookPicker } from "@/components/posts/PlaybookPicker";
 import { useStore } from "@/lib/store";
 import { useHydrated } from "@/lib/hooks";
 import { Platform, Post, PostStatus } from "@/lib/types";
@@ -58,6 +59,12 @@ export default function NewPostPage() {
         title="New post"
         trailing={
           <>
+            <PlaybookPicker
+              post={draft}
+              onApply={({ content, context, playbookId }) =>
+                change({ content, context, playbookId })
+              }
+            />
             <Button variant="ghost" onClick={() => router.push("/posts")}>
               Cancel
             </Button>

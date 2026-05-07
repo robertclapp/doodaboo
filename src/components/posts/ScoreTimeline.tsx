@@ -74,12 +74,13 @@ export function ScoreTimeline({ post }: { post: Post }) {
             x2={W - PAD_X}
             y1={y(v)}
             y2={y(v)}
-            stroke="#0a0a0a18"
+            stroke="currentColor"
+            strokeOpacity={0.1}
             strokeWidth={1}
           />
         ))}
-        <path d={area} fill="#ff5c1a22" />
-        <path d={path} stroke="#0a0a0a" strokeWidth={2} fill="none" />
+        <path d={area} fill="#ff5c1a" fillOpacity={0.13} />
+        <path d={path} stroke="currentColor" strokeWidth={2} fill="none" />
         {points.map((p) => (
           <g key={p.atMinutes}>
             <rect
@@ -88,7 +89,7 @@ export function ScoreTimeline({ post }: { post: Post }) {
               width={6}
               height={6}
               fill="#ff5c1a"
-              stroke="#0a0a0a"
+              stroke="currentColor"
               strokeWidth={1.5}
             />
           </g>
@@ -98,7 +99,8 @@ export function ScoreTimeline({ post }: { post: Post }) {
           y={H - 2}
           fontFamily="ui-monospace, Menlo, monospace"
           fontSize="8"
-          fill="#0a0a0a99"
+          fill="currentColor"
+          fillOpacity={0.6}
         >
           T+0
         </text>
@@ -108,7 +110,8 @@ export function ScoreTimeline({ post }: { post: Post }) {
           textAnchor="end"
           fontFamily="ui-monospace, Menlo, monospace"
           fontSize="8"
-          fill="#0a0a0a99"
+          fill="currentColor"
+          fillOpacity={0.6}
         >
           T+{maxX}m
         </text>

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Copy, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Copy, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -14,6 +14,8 @@ import { ScoreTimeline } from "@/components/posts/ScoreTimeline";
 import { SnapshotForm } from "@/components/posts/SnapshotForm";
 import { Recommendations } from "@/components/posts/Recommendations";
 import { ProjectionPanel } from "@/components/posts/ProjectionPanel";
+import { PlaybookPicker } from "@/components/posts/PlaybookPicker";
+import { getPlaybook } from "@/lib/playbooks";
 import { useStore } from "@/lib/store";
 import { useHydrated } from "@/lib/hooks";
 import { PostStatus } from "@/lib/types";
@@ -95,6 +97,12 @@ export default function PostDetailPage() {
         trailing={
           <>
             <SaveIndicator at={savedAt} />
+            <PlaybookPicker
+              post={post}
+              onApply={({ content, context, playbookId }) =>
+                updatePost(post.id, { content, context, playbookId })
+              }
+            />
             <select
               value={post.status}
               onChange={(e) =>
@@ -246,6 +254,16 @@ export default function PostDetailPage() {
                 {fmt(post.threshold.value)} {post.threshold.metric} ·{" "}
                 {post.threshold.window}
               </Meta>
+              {post.playbookId && (
+                <Meta label="Playbook">
+                  <Link
+                    href={`/playbooks/${post.playbookId}`}
+                    className="hover:underline"
+                  >
+                    {getPlaybook(post.playbookId)?.name ?? post.playbookId}
+                  </Link>
+                </Meta>
+              )}
             </dl>
           </div>
         </div>

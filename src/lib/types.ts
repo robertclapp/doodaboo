@@ -191,6 +191,7 @@ export interface Post {
   postedAt?: string;
   threshold: ViralityThreshold;
   snapshots: EngagementSnapshot[];
+  playbookId?: string;
   createdAt: string;
   updatedAt: string;
 }

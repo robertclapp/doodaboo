@@ -34,7 +34,7 @@ export function Dot({ color, size = 8 }: { color: string; size?: number }) {
         width: size,
         height: size,
         backgroundColor: color,
-        boxShadow: "inset 0 0 0 1.5px #0a0a0a",
+        boxShadow: "inset 0 0 0 1.5px var(--ink-hex)",
       }}
       className="inline-block"
     />

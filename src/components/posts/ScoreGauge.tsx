@@ -44,7 +44,8 @@ export function ScoreGauge({
             cy={SIZE / 2}
             r={RADIUS}
             fill="none"
-            stroke="#0a0a0a1a"
+            stroke="currentColor"
+            strokeOpacity={0.1}
             strokeWidth={STROKE}
           />
           <circle
@@ -70,7 +71,7 @@ export function ScoreGauge({
             fontFamily="ui-monospace, Menlo, monospace"
             fontWeight={700}
             fontSize="36"
-            fill="#0a0a0a"
+            fill="currentColor"
           >
             {value.toFixed(0)}
           </text>
@@ -81,7 +82,8 @@ export function ScoreGauge({
             dominantBaseline="middle"
             fontFamily="ui-monospace, Menlo, monospace"
             fontSize="9"
-            fill="#0a0a0a99"
+            fill="currentColor"
+            fillOpacity={0.6}
             letterSpacing={2}
           >
             /100

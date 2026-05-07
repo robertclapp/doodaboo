@@ -108,7 +108,7 @@ export function ProjectionPanel({
             <Stat
               label="Forecast"
               value={fmt(projection.projected)}
-              tone="#fafaf7"
+              tone="var(--paper-soft-hex)"
             />
           </div>
           <Progress
@@ -155,7 +155,7 @@ function Progress({ ratio }: { ratio: number }) {
         className="absolute inset-y-0 left-0"
         style={{
           width: `${pct}%`,
-          backgroundColor: beyond ? "#c4f000" : "#0a0a0a",
+          backgroundColor: beyond ? "#c4f000" : "var(--ink-hex)",
           transition: "width 400ms cubic-bezier(0.2, 0.8, 0.2, 1)",
         }}
       />

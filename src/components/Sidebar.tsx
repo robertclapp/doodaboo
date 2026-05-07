@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  BarChart3,
+  BookOpen,
+  Columns2,
   Inbox,
   LayoutDashboard,
   ListTodo,
@@ -122,10 +125,28 @@ export function Sidebar({
           <Tag size={12} /> Labels
         </Link>
         <Link
-          className={item(pathname.startsWith("/posts"))}
+          className={item(pathname === "/posts" || (pathname.startsWith("/posts") && pathname !== "/posts/insights" && pathname !== "/posts/compare"))}
           href="/posts"
         >
           <Sparkles size={12} /> Posts
+        </Link>
+        <Link
+          className={item(pathname === "/posts/insights")}
+          href="/posts/insights"
+        >
+          <BarChart3 size={12} /> Insights
+        </Link>
+        <Link
+          className={item(pathname === "/posts/compare")}
+          href="/posts/compare"
+        >
+          <Columns2 size={12} /> Compare
+        </Link>
+        <Link
+          className={item(pathname.startsWith("/playbooks"))}
+          href="/playbooks"
+        >
+          <BookOpen size={12} /> Playbooks
         </Link>
       </nav>
 

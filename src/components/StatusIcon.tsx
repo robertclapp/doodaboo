@@ -5,7 +5,7 @@ import { statusColor } from "@/lib/utils";
 
 export function StatusIcon({ status, size = 14 }: { status: Status; size?: number }) {
   const color = statusColor(status);
-  const stroke = "#0a0a0a";
+  const stroke = "currentColor";
   const sw = 1.5;
   const r = size / 2 - sw / 2;
   const cx = size / 2;
@@ -88,7 +88,7 @@ export function StatusIcon({ status, size = 14 }: { status: Status; size?: numbe
             <path
               d={`M ${cx - r / 1.6} ${cy} L ${cx - r / 6} ${cy + r / 2.2} L ${cx + r / 1.5} ${cy - r / 2.2}`}
               fill="none"
-              stroke="#0a0a0a"
+              stroke="currentColor"
               strokeWidth={sw}
               strokeLinecap="square"
             />
