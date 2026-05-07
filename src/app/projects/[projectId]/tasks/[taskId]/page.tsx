@@ -19,6 +19,7 @@ import {
   timeAgo,
 } from "@/lib/utils";
 import { ArrowLeft, Trash2 } from "lucide-react";
+import { useConfirm, useToast } from "@/components/ToastProvider";
 
 export default function TaskDetailPage() {
   const { projectId, taskId } = useParams<{
@@ -35,6 +36,8 @@ export default function TaskDetailPage() {
   const deleteTask = useStore((s) => s.deleteTask);
   const addComment = useStore((s) => s.addComment);
   const hydrated = useStore((s) => s.hydrated);
+  const confirm = useConfirm();
+  const toast = useToast();
 
   const [title, setTitle] = useState(task?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
@@ -45,7 +48,7 @@ export default function TaskDetailPage() {
       setTitle(task.title);
       setDescription(task.description);
     }
-  }, [task?.id, task?.title, task?.description]);
+  }, [task]);
 
   if (!hydrated) return null;
   // Guard: the taskId path segment must belong to the project in the URL.
@@ -103,9 +106,16 @@ export default function TaskDetailPage() {
             variant="ghost"
             size="sm"
             iconLeft={<Trash2 size={12} />}
-            onClick={() => {
-              if (confirm("Delete this task?")) {
+            onClick={async () => {
+              const ok = await confirm({
+                title: "Delete task",
+                message: `${project.key}-${task.number} will be removed. This can't be undone.`,
+                confirmLabel: "Delete task",
+                destructive: true,
+              });
+              if (ok) {
                 deleteTask(task.id);
+                toast.success("Task deleted");
                 router.push(`/projects/${project.id}`);
               }
             }}

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Input, Label as FormLabel } from "@/components/ui/Input";
 import { useStore } from "@/lib/store";
 import { Plus, Trash2 } from "lucide-react";
+import { useConfirm, useToast } from "@/components/ToastProvider";
 
 const LABEL_COLORS = [
   "#dc2626",
@@ -24,6 +25,8 @@ export default function LabelsPage() {
   const removeLabel = useStore((s) => s.removeLabel);
   const tasks = useStore((s) => s.tasks);
   const hydrated = useStore((s) => s.hydrated);
+  const confirm = useConfirm();
+  const toast = useToast();
 
   const [name, setName] = useState("");
   const [color, setColor] = useState(LABEL_COLORS[0]);
@@ -106,8 +109,17 @@ export default function LabelsPage() {
                     {count} used
                   </span>
                   <button
-                    onClick={() => {
-                      if (confirm(`Remove label "${l.name}"?`)) removeLabel(l.id);
+                    onClick={async () => {
+                      const ok = await confirm({
+                        title: "Remove label",
+                        message: `"${l.name}" will be removed from ${count} ${count === 1 ? "task" : "tasks"}.`,
+                        confirmLabel: "Remove label",
+                        destructive: true,
+                      });
+                      if (ok) {
+                        removeLabel(l.id);
+                        toast.success(`Removed ${l.name}`);
+                      }
                     }}
                     className="p-1 hover:bg-ink hover:text-paper"
                     aria-label="Remove"

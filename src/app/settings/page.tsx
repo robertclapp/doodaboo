@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import {
   Download,
   Monitor,
@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { useStore } from "@/lib/store";
 import { Theme } from "@/lib/store";
+import { useConfirm, useToast } from "@/components/ToastProvider";
 
 export default function SettingsPage() {
   const hydrated = useStore((s) => s.hydrated);
@@ -27,27 +28,32 @@ export default function SettingsPage() {
   const users = useStore((s) => s.users);
   const labels = useStore((s) => s.labels);
 
-  const [message, setMessage] = useState<
-    { kind: "ok" | "err"; text: string } | null
-  >(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const confirm = useConfirm();
+  const toast = useToast();
 
   if (!hydrated) return null;
 
   const handleExport = () => {
-    const payload = exportState();
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `doodaboo-export-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    setMessage({ kind: "ok", text: "Exported workspace to JSON." });
+    try {
+      const payload = exportState();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `doodaboo-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Exported workspace to JSON");
+    } catch (err) {
+      toast.error(
+        `Export failed: ${err instanceof Error ? err.message : "unknown error"}`,
+      );
+    }
   };
 
   const handleImport = async (file: File) => {
@@ -65,24 +71,25 @@ export default function SettingsPage() {
         throw new Error("File does not look like a doodaboo export.");
       }
       importState(payload);
-      setMessage({ kind: "ok", text: "Workspace imported successfully." });
+      toast.success("Workspace imported");
     } catch (err) {
-      setMessage({
-        kind: "err",
-        text: err instanceof Error ? err.message : "Import failed.",
-      });
+      toast.error(
+        err instanceof Error ? err.message : "Import failed",
+      );
     }
   };
 
-  const handleReset = () => {
-    if (
-      !confirm(
-        "Reset to demo seed data? All current projects, tasks, labels and users will be replaced.",
-      )
-    )
-      return;
+  const handleReset = async () => {
+    const ok = await confirm({
+      title: "Reset workspace",
+      message:
+        "All current projects, tasks, labels, posts and users will be replaced with the demo seed data. This can't be undone.",
+      confirmLabel: "Reset to seed",
+      destructive: true,
+    });
+    if (!ok) return;
     resetToSeed();
-    setMessage({ kind: "ok", text: "Reset to seed data." });
+    toast.success("Reset to seed data");
   };
 
   return (
@@ -193,18 +200,6 @@ export default function SettingsPage() {
             </Button>
           </div>
         </section>
-
-        {message && (
-          <div
-            className={`col-span-12 border-[1.5px] border-ink px-3 py-2 font-mono text-[11px] uppercase tracking-wider ${
-              message.kind === "ok"
-                ? "bg-accent-lime text-ink"
-                : "bg-priority-urgent text-paper"
-            }`}
-          >
-            {message.text}
-          </div>
-        )}
       </div>
     </>
   );

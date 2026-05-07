@@ -8,6 +8,7 @@ import { Modal } from "@/components/ui/Modal";
 import { useStore } from "@/lib/store";
 import { Avatar } from "@/components/ui/Avatar";
 import { Check, Plus, Trash2 } from "lucide-react";
+import { useConfirm, useToast } from "@/components/ToastProvider";
 
 const USER_COLORS = [
   "#ff5c1a",
@@ -29,6 +30,8 @@ export default function TeamPage() {
   const tasks = useStore((s) => s.tasks);
   const projects = useStore((s) => s.projects);
   const hydrated = useStore((s) => s.hydrated);
+  const confirm = useConfirm();
+  const toast = useToast();
 
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -128,9 +131,18 @@ export default function TeamPage() {
                   variant="ghost"
                   size="sm"
                   iconLeft={<Trash2 size={12} />}
-                  onClick={() => {
+                  onClick={async () => {
                     if (u.id === currentUserId) return;
-                    if (confirm(`Remove ${u.name}?`)) removeUser(u.id);
+                    const ok = await confirm({
+                      title: "Remove member",
+                      message: `${u.name} will be unassigned from ${openCount} open ${openCount === 1 ? "issue" : "issues"} and ${led} ${led === 1 ? "project" : "projects"}.`,
+                      confirmLabel: "Remove member",
+                      destructive: true,
+                    });
+                    if (ok) {
+                      removeUser(u.id);
+                      toast.success(`Removed ${u.name}`);
+                    }
                   }}
                   disabled={u.id === currentUserId}
                 >

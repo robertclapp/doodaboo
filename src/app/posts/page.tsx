@@ -2,7 +2,15 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { BarChart3, BookOpen, Columns2, Plus, Sparkles, Search } from "lucide-react";
+import {
+  BarChart3,
+  BookOpen,
+  Columns2,
+  FlaskConical,
+  Plus,
+  Search,
+  Sparkles,
+} from "lucide-react";
 import { PageHeader, Tab } from "@/components/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -84,17 +92,22 @@ export default function PostsPage() {
         }
         trailing={
           <>
-            <Link href="/playbooks">
+            <Link href="/posts/lab" className="hidden md:block">
+              <Button variant="ghost" size="sm" iconLeft={<FlaskConical size={12} />}>
+                Hook Lab
+              </Button>
+            </Link>
+            <Link href="/playbooks" className="hidden md:block">
               <Button variant="ghost" size="sm" iconLeft={<BookOpen size={12} />}>
                 Playbooks
               </Button>
             </Link>
-            <Link href="/posts/insights">
+            <Link href="/posts/insights" className="hidden md:block">
               <Button variant="ghost" size="sm" iconLeft={<BarChart3 size={12} />}>
                 Insights
               </Button>
             </Link>
-            <Link href="/posts/compare">
+            <Link href="/posts/compare" className="hidden md:block">
               <Button variant="ghost" size="sm" iconLeft={<Columns2 size={12} />}>
                 Compare
               </Button>

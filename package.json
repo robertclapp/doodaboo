@@ -7,14 +7,18 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "lint:fix": "next lint --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css,md,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css,md,json}\"",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx src/lib/virality.test.ts"
+    "test": "node --test --import tsx src/lib/virality.test.ts",
+    "verify": "npm run typecheck && npm run lint && npm test"
   },
   "dependencies": {
     "clsx": "^2.1.1",
     "lucide-react": "^0.454.0",
     "nanoid": "^5.0.7",
-    "next": "14.2.35",
+    "next": "^15.5.16",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "zustand": "^4.5.5"
@@ -24,7 +28,10 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^15.5.16",
     "postcss": "^8.4.49",
+    "prettier": "^3.8.3",
     "tailwindcss": "^3.4.14",
     "tsx": "^4.21.0",
     "typescript": "^5.6.3"

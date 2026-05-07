@@ -7,6 +7,7 @@ import {
   BarChart3,
   BookOpen,
   Columns2,
+  FlaskConical,
   FolderKanban,
   Home,
   Inbox,
@@ -192,6 +193,16 @@ export function CommandPalette({
         icon: <Columns2 size={12} />,
         onSelect: () => {
           router.push("/posts/compare");
+          onClose();
+        },
+      },
+      {
+        id: "go_lab",
+        label: "Open Hook Lab",
+        group: "Create",
+        icon: <FlaskConical size={12} />,
+        onSelect: () => {
+          router.push("/posts/lab");
           onClose();
         },
       },

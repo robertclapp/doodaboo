@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, BookOpen, Copy, Trash2 } from "lucide-react";
+import { ArrowLeft, Copy, Trash2 } from "lucide-react";
+import { useConfirm, useToast } from "@/components/ToastProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -39,6 +40,8 @@ export default function PostDetailPage() {
   const addSnapshot = useStore((s) => s.addSnapshot);
   const removeSnapshot = useStore((s) => s.removeSnapshot);
   const hydrated = useHydrated();
+  const confirm = useConfirm();
+  const toast = useToast();
 
   const live = useMemo(() => (post ? scoreLive(post) : undefined), [post]);
   const recommendations = useMemo(() => (post ? recommend(post) : []), [post]);
@@ -52,7 +55,7 @@ export default function PostDetailPage() {
       setSavedAt(Date.now());
     }
     lastSeenUpdate.current = post.updatedAt;
-  }, [post?.updatedAt]);
+  }, [post]);
   useEffect(() => {
     if (!savedAt) return;
     const t = setTimeout(() => setSavedAt(null), 1600);
@@ -133,9 +136,16 @@ export default function PostDetailPage() {
               variant="ghost"
               size="sm"
               iconLeft={<Trash2 size={12} />}
-              onClick={() => {
-                if (confirm("Delete this post?")) {
+              onClick={async () => {
+                const ok = await confirm({
+                  title: "Delete post",
+                  message: "Snapshots and score history will be lost.",
+                  confirmLabel: "Delete post",
+                  destructive: true,
+                });
+                if (ok) {
                   deletePost(post.id);
+                  toast.success("Post deleted");
                   router.push("/posts");
                 }
               }}

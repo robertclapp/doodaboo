@@ -4,8 +4,6 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { PageHeader, Tab } from "@/components/PageHeader";
-import { StatusIcon } from "@/components/StatusIcon";
-import { PriorityIcon } from "@/components/PriorityIcon";
 import { AvatarStack } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -18,6 +16,7 @@ import { AssigneePicker } from "@/components/pickers/AssigneePicker";
 import { Priority, PRIORITIES, Status, STATUSES } from "@/lib/types";
 import { formatDateShort } from "@/lib/utils";
 import { LayoutGrid, List, Search, Trash2 } from "lucide-react";
+import { useConfirm, useToast } from "@/components/ToastProvider";
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -30,6 +29,9 @@ export default function ProjectDetailPage() {
   const updateProject = useStore((s) => s.updateProject);
   const deleteProject = useStore((s) => s.deleteProject);
   const hydrated = useStore((s) => s.hydrated);
+
+  const confirm = useConfirm();
+  const toast = useToast();
 
   const [view, setView] = useState<"list" | "board">("list");
   const [filterStatus, setFilterStatus] = useState<Status | "all">("all");
@@ -98,9 +100,16 @@ export default function ProjectDetailPage() {
               variant="ghost"
               size="sm"
               iconLeft={<Trash2 size={12} />}
-              onClick={() => {
-                if (confirm(`Delete "${project.name}" and all its tasks?`)) {
+              onClick={async () => {
+                const ok = await confirm({
+                  title: "Delete project",
+                  message: `This will delete "${project.name}" and all its tasks. This can't be undone.`,
+                  confirmLabel: "Delete project",
+                  destructive: true,
+                });
+                if (ok) {
                   deleteProject(project.id);
+                  toast.success(`Deleted ${project.name}`);
                   router.push("/projects");
                 }
               }}

@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect } from "react";
 import {
   BarChart3,
   BookOpen,
   Columns2,
+  FlaskConical,
   Inbox,
   LayoutDashboard,
   ListTodo,
@@ -14,6 +16,7 @@ import {
   Plus,
   Tag,
   Sparkles,
+  X,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -23,11 +26,21 @@ import { StatusIcon } from "./StatusIcon";
 export function Sidebar({
   onNewTask,
   onOpenShortcuts,
+  mobileOpen,
+  onMobileClose,
 }: {
   onNewTask: () => void;
   onOpenShortcuts: () => void;
+  mobileOpen: boolean;
+  onMobileClose: () => void;
 }) {
   const pathname = usePathname();
+
+  // Close the mobile drawer whenever the route changes.
+  useEffect(() => {
+    onMobileClose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
   const projects = useStore((s) => s.projects);
   const tasks = useStore((s) => s.tasks);
   const currentUser = useStore((s) =>
@@ -50,20 +63,45 @@ export function Sidebar({
     );
 
   return (
-    <aside className="w-[240px] shrink-0 border-r-[1.5px] border-ink bg-paper-soft flex flex-col">
-      <div className="h-12 border-b-[1.5px] border-ink flex items-center px-3 gap-2">
-        <div className="w-6 h-6 bg-ink text-paper flex items-center justify-center font-mono font-bold text-xs">
-          D
-        </div>
-        <div className="leading-tight">
-          <div className="font-mono text-[11px] uppercase font-bold tracking-widest">
-            Doodaboo
+    <>
+      {/* Mobile backdrop */}
+      <div
+        className={cn(
+          "fixed inset-0 bg-ink/60 backdrop-blur-[2px] z-40 lg:hidden transition-opacity",
+          mobileOpen ? "opacity-100" : "opacity-0 pointer-events-none",
+        )}
+        onClick={onMobileClose}
+        aria-hidden
+      />
+      <aside
+        className={cn(
+          "w-[260px] shrink-0 border-r-[1.5px] border-ink bg-paper-soft flex flex-col",
+          // Desktop: static. Mobile: fixed drawer that slides in from the left.
+          "fixed lg:static inset-y-0 left-0 z-50 transition-transform lg:translate-x-0",
+          mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
+        )}
+        aria-label="Primary navigation"
+      >
+        <div className="h-12 border-b-[1.5px] border-ink flex items-center px-3 gap-2">
+          <div className="w-6 h-6 bg-ink text-paper flex items-center justify-center font-mono font-bold text-xs">
+            D
           </div>
-          <div className="font-mono text-[9px] uppercase tracking-wider text-ink/50">
-            project.os v0.1
+          <div className="leading-tight flex-1">
+            <div className="font-mono text-[11px] uppercase font-bold tracking-widest">
+              Doodaboo
+            </div>
+            <div className="font-mono text-[9px] uppercase tracking-wider text-ink/50">
+              project.os v0.1
+            </div>
           </div>
+          <button
+            onClick={onMobileClose}
+            className="lg:hidden p-1 hover:bg-ink hover:text-paper transition-colors"
+            aria-label="Close navigation"
+          >
+            <X size={14} />
+          </button>
         </div>
-      </div>
 
       {currentUser && (
         <div className="border-b-[1.5px] border-ink px-3 py-2 flex items-center gap-2">
@@ -143,6 +181,12 @@ export function Sidebar({
           <Columns2 size={12} /> Compare
         </Link>
         <Link
+          className={item(pathname === "/posts/lab")}
+          href="/posts/lab"
+        >
+          <FlaskConical size={12} /> Hook Lab
+        </Link>
+        <Link
           className={item(pathname.startsWith("/playbooks"))}
           href="/playbooks"
         >
@@ -212,6 +256,7 @@ export function Sidebar({
           shortcuts ?
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }
