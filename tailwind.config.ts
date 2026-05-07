@@ -1,19 +1,20 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
+  darkMode: ["class", '[data-theme="dark"]'],
   content: ["./src/**/*.{js,ts,jsx,tsx,mdx}"],
   theme: {
     extend: {
       colors: {
         ink: {
-          DEFAULT: "#0a0a0a",
-          soft: "#171717",
-          muted: "#262626",
+          DEFAULT: "rgb(var(--ink) / <alpha-value>)",
+          soft: "rgb(var(--ink-soft) / <alpha-value>)",
+          muted: "rgb(var(--ink-muted) / <alpha-value>)",
         },
         paper: {
-          DEFAULT: "#fafaf7",
-          soft: "#f2f2ed",
-          warm: "#e8e8e0",
+          DEFAULT: "rgb(var(--paper) / <alpha-value>)",
+          soft: "rgb(var(--paper-soft) / <alpha-value>)",
+          warm: "rgb(var(--paper-warm) / <alpha-value>)",
         },
         accent: {
           DEFAULT: "#ff5c1a",
@@ -56,9 +57,9 @@ const config: Config = {
         ],
       },
       boxShadow: {
-        brutal: "4px 4px 0 0 #0a0a0a",
-        "brutal-sm": "2px 2px 0 0 #0a0a0a",
-        "brutal-lg": "6px 6px 0 0 #0a0a0a",
+        brutal: "4px 4px 0 0 rgb(var(--ink))",
+        "brutal-sm": "2px 2px 0 0 rgb(var(--ink))",
+        "brutal-lg": "6px 6px 0 0 rgb(var(--ink))",
       },
       borderWidth: {
         "1.5": "1.5px",

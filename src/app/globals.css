@@ -3,13 +3,55 @@
 @tailwind utilities;
 
 :root {
+  /* RGB triplets so Tailwind can apply alpha via rgb(var(--ink) / 0.5) */
+  --paper: 250 250 247;
+  --paper-soft: 242 242 237;
+  --paper-warm: 232 232 224;
+  --ink: 10 10 10;
+  --ink-soft: 23 23 23;
+  --ink-muted: 38 38 38;
+
+  /* Hex aliases for use in inline SVG attribute values */
+  --paper-hex: #fafaf7;
+  --paper-soft-hex: #f2f2ed;
+  --ink-hex: #0a0a0a;
+
+  /* Selection */
+  --selection-bg: #0a0a0a;
+  --selection-fg: #c4f000;
+
+  /* Subtle grid line color */
+  --grid-line: rgba(10, 10, 10, 0.06);
+  --grid-line-strong: rgba(10, 10, 10, 0.18);
+
   color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --paper: 14 14 14;
+  --paper-soft: 24 24 24;
+  --paper-warm: 38 38 38;
+  --ink: 250 250 247;
+  --ink-soft: 232 232 224;
+  --ink-muted: 163 163 163;
+
+  --paper-hex: #0e0e0e;
+  --paper-soft-hex: #181818;
+  --ink-hex: #fafaf7;
+
+  --selection-bg: #c4f000;
+  --selection-fg: #0a0a0a;
+
+  --grid-line: rgba(250, 250, 247, 0.08);
+  --grid-line-strong: rgba(250, 250, 247, 0.22);
+
+  color-scheme: dark;
 }
 
 html,
 body {
-  background: #fafaf7;
-  color: #0a0a0a;
+  background: rgb(var(--paper));
+  color: rgb(var(--ink));
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
 }
@@ -23,8 +65,8 @@ button {
 }
 
 ::selection {
-  background: #0a0a0a;
-  color: #c4f000;
+  background: var(--selection-bg);
+  color: var(--selection-fg);
 }
 
 /* Scrollbar */
@@ -36,31 +78,33 @@ button {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #0a0a0a;
-  border: 2px solid #fafaf7;
+  background: rgb(var(--ink));
+  border: 2px solid rgb(var(--paper));
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #262626;
+  background: rgb(var(--ink-muted));
 }
 
-/* Grid background utility */
 .bg-grid {
   background-image:
-    linear-gradient(to right, rgba(10, 10, 10, 0.06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(10, 10, 10, 0.06) 1px, transparent 1px);
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 
-/* Disable hover styles on touch */
 @media (hover: none) {
   .hover\:translate-x-0\.5:hover {
     transform: none !important;
   }
 }
 
-/* Motion */
 @keyframes wink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.2; }
 }
 .animate-wink { animation: wink 1.4s ease-in-out infinite; }
+
+/* Smooth theme transition */
+html {
+  transition: background-color 200ms ease, color 200ms ease;
+}

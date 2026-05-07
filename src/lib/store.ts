@@ -24,6 +24,8 @@ import {
 
 const EXPORT_VERSION = 1;
 
+export type Theme = "light" | "dark" | "system";
+
 export interface ExportPayload {
   version: number;
   exportedAt: string;
@@ -37,6 +39,7 @@ export interface ExportPayload {
 
 interface StoreState {
   hydrated: boolean;
+  theme: Theme;
   currentUserId: string;
   users: User[];
   labels: Label[];
@@ -46,6 +49,7 @@ interface StoreState {
 
   // hydration
   setHydrated: (v: boolean) => void;
+  setTheme: (t: Theme) => void;
   resetToSeed: () => void;
   exportState: () => ExportPayload;
   importState: (payload: ExportPayload) => void;
@@ -93,6 +97,7 @@ export const useStore = create<StoreState>()(
   persist(
     (set, get) => ({
       hydrated: false,
+      theme: "system",
       currentUserId: seedUsers[0].id,
       users: seedUsers,
       labels: seedLabels,
@@ -101,6 +106,7 @@ export const useStore = create<StoreState>()(
       posts: seedPosts,
 
       setHydrated: (v) => set({ hydrated: v }),
+      setTheme: (theme) => set({ theme }),
       resetToSeed: () =>
         set({
           currentUserId: seedUsers[0].id,
@@ -441,6 +447,7 @@ export const useStore = create<StoreState>()(
           : window.localStorage,
       ),
       partialize: (s) => ({
+        theme: s.theme,
         currentUserId: s.currentUserId,
         users: s.users,
         labels: s.labels,
