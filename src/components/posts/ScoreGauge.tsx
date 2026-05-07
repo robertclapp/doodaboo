@@ -64,6 +64,7 @@ export function ScoreGauge({
             }}
           />
           <text
+            data-testid="score-value"
             x="50%"
             y="48%"
             textAnchor="middle"

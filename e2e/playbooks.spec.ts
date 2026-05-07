@@ -17,7 +17,10 @@ test.describe("Playbooks", () => {
       page.getByRole("main").getByText(/X funnel/i),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: /^thread$/i }).click();
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: /^thread$/i })
+      .click();
     await expect(
       page.getByRole("main").getByText(/X funnel/i),
     ).toBeVisible();
@@ -46,20 +49,12 @@ test.describe("Playbooks", () => {
       .getByRole("button", { name: /Apply playbook|Playbook · /i })
       .first()
       .click();
-    await expect(
-      page.getByRole("dialog").getByText(/Apply a playbook/i),
-    ).toBeVisible();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText(/Apply a playbook/i)).toBeVisible();
 
-    // Pick the 3-second hook playbook.
-    await page.getByRole("button", { name: /3-second hook/i }).click();
-    await expect(
-      page.getByRole("dialog").getByText(/Preview · 3-second hook/i),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("dialog").getByText(/Before/i),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("dialog").getByText(/After/i),
-    ).toBeVisible();
+    await dialog.getByRole("button", { name: /3-second hook/i }).click();
+    await expect(dialog.getByText(/Preview · 3-second hook/i)).toBeVisible();
+    await expect(dialog.getByText(/Before/i)).toBeVisible();
+    await expect(dialog.getByText(/After/i)).toBeVisible();
   });
 });
