@@ -49,6 +49,11 @@ test.describe("Projects + tasks", () => {
       .first()
       .click();
     await page.getByRole("button", { name: /^Board$/i }).click();
+    // Scope to the kanban column headers via testid so the Status filter
+    // dropdown's <option> elements (which match the same labels but are
+    // hidden) don't satisfy the locator.
+    const headers = page.getByTestId("kanban-column-header");
+    await expect(headers).toHaveCount(6);
     for (const label of [
       "Backlog",
       "Todo",
@@ -57,12 +62,9 @@ test.describe("Projects + tasks", () => {
       "Done",
       "Cancelled",
     ]) {
-      await expect(
-        page
-          .getByRole("main")
-          .getByText(new RegExp(`^${label}$`, "i"))
-          .first(),
-      ).toBeVisible();
+      // Substring match is enough — every status label is unique among the
+      // six columns, so there's no risk of one matching another's header.
+      await expect(headers.filter({ hasText: label })).toBeVisible();
     }
   });
 });

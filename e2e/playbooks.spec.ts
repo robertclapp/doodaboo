@@ -54,7 +54,10 @@ test.describe("Playbooks", () => {
 
     await dialog.getByRole("button", { name: /3-second hook/i }).click();
     await expect(dialog.getByText(/Preview · 3-second hook/i)).toBeVisible();
-    await expect(dialog.getByText(/Before/i)).toBeVisible();
-    await expect(dialog.getByText(/After/i)).toBeVisible();
+    // Stat labels are exact-match strings; the same words appear in the
+    // playbook description and notes blocks below, so a substring match
+    // would resolve multiple elements.
+    await expect(dialog.getByText("Before", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("After", { exact: true })).toBeVisible();
   });
 });

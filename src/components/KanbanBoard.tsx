@@ -42,7 +42,10 @@ export function KanbanBoard({ tasks }: { tasks: Task[] }) {
                 overStatus === s.id && "shadow-brutal-sm -translate-x-[1px] -translate-y-[1px]",
               )}
             >
-              <div className="h-9 border-b-[1.5px] border-ink px-2 flex items-center gap-2 bg-paper-soft">
+              <div
+                data-testid="kanban-column-header"
+                className="h-9 border-b-[1.5px] border-ink px-2 flex items-center gap-2 bg-paper-soft"
+              >
                 <StatusIcon status={s.id} />
                 <div className="font-mono text-[11px] uppercase tracking-wider font-bold">
                   {s.label}

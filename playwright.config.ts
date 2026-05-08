@@ -32,7 +32,16 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        // Allow E2E_CHROMIUM_PATH to override the bundled binary so the
+        // suite can run inside sandboxes that block Playwright's binary
+        // download (e.g. local dev containers with a system chromium
+        // already on disk).
+        ...(process.env.E2E_CHROMIUM_PATH
+          ? { launchOptions: { executablePath: process.env.E2E_CHROMIUM_PATH } }
+          : {}),
+      },
     },
   ],
 
