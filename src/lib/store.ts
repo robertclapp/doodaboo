@@ -2,9 +2,7 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { nanoid } from "nanoid";
 import {
-  ActivityEntry,
   Comment,
   EngagementSnapshot,
   Label,
@@ -15,16 +13,35 @@ import {
   User,
 } from "./types";
 import {
-  seedLabels,
-  seedPosts,
-  seedProjects,
-  seedTasks,
-  seedUsers,
-} from "./seed";
+  addComment as addCommentMut,
+  addLabel as addLabelMut,
+  addSnapshot as addSnapshotMut,
+  addUser as addUserMut,
+  createPost as createPostMut,
+  createProject as createProjectMut,
+  createTask as createTaskMut,
+  deletePost as deletePostMut,
+  deleteProject as deleteProjectMut,
+  deleteTask as deleteTaskMut,
+  duplicatePost as duplicatePostMut,
+  emptyWorkspace,
+  moveTaskStatus as moveTaskStatusMut,
+  removeLabel as removeLabelMut,
+  removeSnapshot as removeSnapshotMut,
+  removeUser as removeUserMut,
+  setCurrentUser as setCurrentUserMut,
+  setTheme as setThemeMut,
+  Theme,
+  updatePost as updatePostMut,
+  updateProject as updateProjectMut,
+  updateTask as updateTaskMut,
+  WorkspaceState,
+  WORKSPACE_VERSION,
+} from "./mutations";
+
+export type { Theme } from "./mutations";
 
 const EXPORT_VERSION = 1;
-
-export type Theme = "light" | "dark" | "system";
 
 export interface ExportPayload {
   version: number;
@@ -37,40 +54,28 @@ export interface ExportPayload {
   currentUserId?: string;
 }
 
-interface StoreState {
+interface StoreState extends WorkspaceState {
   hydrated: boolean;
-  theme: Theme;
-  currentUserId: string;
-  users: User[];
-  labels: Label[];
-  projects: Project[];
-  tasks: Task[];
-  posts: Post[];
 
-  // hydration
   setHydrated: (v: boolean) => void;
   setTheme: (t: Theme) => void;
   resetToSeed: () => void;
   exportState: () => ExportPayload;
   importState: (payload: ExportPayload) => void;
 
-  // user
   setCurrentUser: (id: string) => void;
   addUser: (u: Omit<User, "id">) => User;
   removeUser: (id: string) => void;
 
-  // labels
   addLabel: (l: Omit<Label, "id">) => Label;
   removeLabel: (id: string) => void;
 
-  // projects
   createProject: (
     data: Partial<Project> & Pick<Project, "name" | "key">,
   ) => Project;
   updateProject: (id: string, patch: Partial<Project>) => void;
   deleteProject: (id: string) => void;
 
-  // tasks
   createTask: (
     data: Partial<Task> & Pick<Task, "projectId" | "title">,
   ) => Task;
@@ -79,11 +84,13 @@ interface StoreState {
   moveTaskStatus: (id: string, status: Status) => void;
   addComment: (taskId: string, body: string) => Comment | undefined;
 
-  // posts
   createPost: (data: Partial<Post> & Pick<Post, "title" | "platform">) => Post;
   updatePost: (id: string, patch: Partial<Post>) => void;
   deletePost: (id: string) => void;
-  duplicatePost: (id: string, opts?: { titleSuffix?: string }) => Post | undefined;
+  duplicatePost: (
+    id: string,
+    opts?: { titleSuffix?: string },
+  ) => Post | undefined;
   addSnapshot: (
     postId: string,
     snapshot: Omit<EngagementSnapshot, "id" | "capturedAt">,
@@ -91,31 +98,51 @@ interface StoreState {
   removeSnapshot: (postId: string, snapshotId: string) => void;
 }
 
-const nowIso = () => new Date().toISOString();
+/** Apply a pure mutation that returns just the new WorkspaceState. */
+function apply(
+  set: (s: Partial<StoreState>) => void,
+  get: () => StoreState,
+  fn: (state: WorkspaceState) => WorkspaceState,
+): void {
+  set(fn(extract(get())) as Partial<StoreState>);
+}
+
+/** Apply a pure mutation that returns { state, result } and bubble result. */
+function applyAnd<T>(
+  set: (s: Partial<StoreState>) => void,
+  get: () => StoreState,
+  fn: (state: WorkspaceState) => { state: WorkspaceState; result: T },
+): T {
+  const r = fn(extract(get()));
+  set(r.state as Partial<StoreState>);
+  return r.result;
+}
+
+/** Pull the bare WorkspaceState out of the merged StoreState. */
+function extract(s: StoreState): WorkspaceState {
+  return {
+    version: WORKSPACE_VERSION,
+    theme: s.theme,
+    currentUserId: s.currentUserId,
+    users: s.users,
+    labels: s.labels,
+    projects: s.projects,
+    tasks: s.tasks,
+    posts: s.posts,
+  };
+}
+
+const seed = emptyWorkspace();
 
 export const useStore = create<StoreState>()(
   persist(
     (set, get) => ({
+      ...seed,
       hydrated: false,
-      theme: "system",
-      currentUserId: seedUsers[0].id,
-      users: seedUsers,
-      labels: seedLabels,
-      projects: seedProjects,
-      tasks: seedTasks,
-      posts: seedPosts,
 
       setHydrated: (v) => set({ hydrated: v }),
-      setTheme: (theme) => set({ theme }),
-      resetToSeed: () =>
-        set({
-          currentUserId: seedUsers[0].id,
-          users: seedUsers,
-          labels: seedLabels,
-          projects: seedProjects,
-          tasks: seedTasks,
-          posts: seedPosts,
-        }),
+      setTheme: (theme) => apply(set, get, (s) => setThemeMut(s, theme)),
+      resetToSeed: () => set({ ...emptyWorkspace() }),
       exportState: () => ({
         version: EXPORT_VERSION,
         exportedAt: new Date().toISOString(),
@@ -146,300 +173,52 @@ export const useStore = create<StoreState>()(
         });
       },
 
-      setCurrentUser: (id) => set({ currentUserId: id }),
-      addUser: (u) => {
-        const user: User = { id: `u_${nanoid(6)}`, ...u };
-        set((s) => ({ users: [...s.users, user] }));
-        return user;
-      },
-      removeUser: (id) =>
-        set((s) => ({
-          users: s.users.filter((u) => u.id !== id),
-          projects: s.projects.map((p) => ({
-            ...p,
-            leadId: p.leadId === id ? undefined : p.leadId,
-            memberIds: p.memberIds.filter((m) => m !== id),
-          })),
-          tasks: s.tasks.map((t) => ({
-            ...t,
-            assigneeId: t.assigneeId === id ? undefined : t.assigneeId,
-          })),
-        })),
+      setCurrentUser: (id) => apply(set, get, (s) => setCurrentUserMut(s, id)),
+      addUser: (u) => applyAnd(set, get, (s) => addUserAdapter(s, u)),
+      removeUser: (id) => apply(set, get, (s) => removeUserMut(s, id)),
 
-      addLabel: (l) => {
-        const label: Label = { id: `l_${nanoid(6)}`, ...l };
-        set((s) => ({ labels: [...s.labels, label] }));
-        return label;
-      },
-      removeLabel: (id) =>
-        set((s) => ({
-          labels: s.labels.filter((l) => l.id !== id),
-          tasks: s.tasks.map((t) => ({
-            ...t,
-            labelIds: t.labelIds.filter((lid) => lid !== id),
-          })),
-        })),
+      addLabel: (l) => applyAnd(set, get, (s) => addLabelAdapter(s, l)),
+      removeLabel: (id) => apply(set, get, (s) => removeLabelMut(s, id)),
 
-      createProject: (data) => {
-        const project: Project = {
-          id: `p_${nanoid(6)}`,
-          key: data.key,
-          name: data.name,
-          description: data.description ?? "",
-          status: data.status ?? "todo",
-          priority: data.priority ?? "medium",
-          leadId: data.leadId ?? get().currentUserId,
-          memberIds: data.memberIds ?? [get().currentUserId],
-          targetDate: data.targetDate,
-          icon: data.icon ?? data.name.charAt(0).toUpperCase(),
-          accent: data.accent ?? "#ff5c1a",
-          createdAt: nowIso(),
-          updatedAt: nowIso(),
-          nextTaskNumber: 1,
-        };
-        set((s) => ({ projects: [project, ...s.projects] }));
-        return project;
-      },
+      createProject: (data) =>
+        applyAnd(set, get, (s) => createProjectAdapter(s, data)),
       updateProject: (id, patch) =>
-        set((s) => ({
-          projects: s.projects.map((p) =>
-            p.id === id ? { ...p, ...patch, updatedAt: nowIso() } : p,
-          ),
-        })),
-      deleteProject: (id) =>
-        set((s) => ({
-          projects: s.projects.filter((p) => p.id !== id),
-          tasks: s.tasks.filter((t) => t.projectId !== id),
-        })),
+        apply(set, get, (s) => updateProjectMut(s, id, patch)),
+      deleteProject: (id) => apply(set, get, (s) => deleteProjectMut(s, id)),
 
-      createTask: (data) => {
-        const project = get().projects.find((p) => p.id === data.projectId);
-        if (!project) {
-          throw new Error(`Cannot create task: project ${data.projectId} not found`);
-        }
-        const number = project.nextTaskNumber;
-        const task: Task = {
-          id: `t_${nanoid(6)}`,
-          projectId: data.projectId,
-          number,
-          type: data.type ?? "task",
-          title: data.title,
-          description: data.description ?? "",
-          status: data.status ?? "todo",
-          priority: data.priority ?? "medium",
-          assigneeId: data.assigneeId,
-          labelIds: data.labelIds ?? [],
-          dueDate: data.dueDate,
-          estimate: data.estimate,
-          createdAt: nowIso(),
-          updatedAt: nowIso(),
-          comments: [],
-          activity: [
-            {
-              id: nanoid(6),
-              at: nowIso(),
-              authorId: get().currentUserId,
-              message: `Created ${data.type ?? "task"}`,
-            },
-          ],
-        };
-        set((s) => ({
-          tasks: [task, ...s.tasks],
-          projects: s.projects.map((p) =>
-            p.id === data.projectId
-              ? { ...p, nextTaskNumber: p.nextTaskNumber + 1 }
-              : p,
-          ),
-        }));
-        return task;
-      },
+      createTask: (data) =>
+        applyAnd(set, get, (s) => createTaskAdapter(s, data)),
       updateTask: (id, patch) =>
-        set((s) => {
-          const existing = s.tasks.find((t) => t.id === id);
-          if (!existing) return { tasks: s.tasks };
-          const entries: ActivityEntry[] = [];
-          if (patch.status && patch.status !== existing.status) {
-            entries.push({
-              id: nanoid(6),
-              at: nowIso(),
-              authorId: s.currentUserId,
-              message: `Status → ${patch.status.replace("_", " ")}`,
-            });
-          }
-          if (patch.priority && patch.priority !== existing.priority) {
-            entries.push({
-              id: nanoid(6),
-              at: nowIso(),
-              authorId: s.currentUserId,
-              message: `Priority → ${patch.priority}`,
-            });
-          }
-          if (
-            patch.assigneeId !== undefined &&
-            patch.assigneeId !== existing.assigneeId
-          ) {
-            const u = s.users.find((x) => x.id === patch.assigneeId);
-            entries.push({
-              id: nanoid(6),
-              at: nowIso(),
-              authorId: s.currentUserId,
-              message: u ? `Assigned to @${u.handle}` : "Unassigned",
-            });
-          }
-          return {
-            tasks: s.tasks.map((t) =>
-              t.id === id
-                ? {
-                    ...t,
-                    ...patch,
-                    updatedAt: nowIso(),
-                    activity: [...t.activity, ...entries],
-                  }
-                : t,
-            ),
-          };
-        }),
-      deleteTask: (id) =>
-        set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
+        apply(set, get, (s) => updateTaskMut(s, id, patch)),
+      deleteTask: (id) => apply(set, get, (s) => deleteTaskMut(s, id)),
       moveTaskStatus: (id, status) =>
-        get().updateTask(id, { status }),
-      createPost: (data) => {
-        const post: Post = {
-          id: `po_${nanoid(6)}`,
-          projectId: data.projectId,
-          title: data.title,
-          platform: data.platform,
-          status: data.status ?? "draft",
-          scheduledAt: data.scheduledAt,
-          postedAt: data.postedAt,
-          threshold: data.threshold ?? {
-            metric: "views",
-            value: 100000,
-            window: "7d",
-          },
-          snapshots: data.snapshots ?? [],
-          content: data.content ?? {
-            hook: "",
-            caption: "",
-            hashtags: [],
-            transcript: "",
-            format: "video",
-            durationSec: undefined,
-            hasTrendingAudio: false,
-          },
-          context: data.context ?? {
-            audienceSize: 1000,
-            accountAvgViews: 200,
-            postingHour: 12,
-            dayOfWeek: 2,
-            topicCategory: "general",
-            novelty: 3,
-            emotion: 3,
-            trendMatch: 3,
-            sentiment: "neutral",
-          },
-          createdAt: nowIso(),
-          updatedAt: nowIso(),
-        };
-        set((s) => ({ posts: [post, ...s.posts] }));
-        return post;
+        apply(set, get, (s) => moveTaskStatusMut(s, id, status)),
+      addComment: (taskId, body) => {
+        const r = addCommentMut(extract(get()), taskId, body);
+        set(r.state as Partial<StoreState>);
+        return r.comment;
       },
+
+      createPost: (data) =>
+        applyAnd(set, get, (s) => createPostAdapter(s, data)),
       updatePost: (id, patch) =>
-        set((s) => ({
-          posts: s.posts.map((p) =>
-            p.id === id ? { ...p, ...patch, updatedAt: nowIso() } : p,
-          ),
-        })),
-      deletePost: (id) =>
-        set((s) => ({ posts: s.posts.filter((p) => p.id !== id) })),
+        apply(set, get, (s) => updatePostMut(s, id, patch)),
+      deletePost: (id) => apply(set, get, (s) => deletePostMut(s, id)),
       duplicatePost: (id, opts) => {
-        const original = get().posts.find((p) => p.id === id);
-        if (!original) return undefined;
-        const suffix = opts?.titleSuffix ?? " (variant)";
-        const copy: Post = {
-          ...original,
-          id: `po_${nanoid(6)}`,
-          title: `${original.title}${suffix}`.trim(),
-          status: "draft",
-          scheduledAt: undefined,
-          postedAt: undefined,
-          snapshots: [],
-          createdAt: nowIso(),
-          updatedAt: nowIso(),
-        };
-        set((s) => ({ posts: [copy, ...s.posts] }));
-        return copy;
+        const r = duplicatePostMut(extract(get()), id, opts);
+        set(r.state as Partial<StoreState>);
+        return r.post;
       },
       addSnapshot: (postId, snapshot) => {
-        const snap: EngagementSnapshot = {
-          id: nanoid(6),
-          capturedAt: nowIso(),
-          ...snapshot,
-        };
-        set((s) => ({
-          posts: s.posts.map((p) =>
-            p.id === postId
-              ? {
-                  ...p,
-                  snapshots: [...p.snapshots, snap].sort(
-                    (a, b) => a.atMinutes - b.atMinutes,
-                  ),
-                  updatedAt: nowIso(),
-                }
-              : p,
-          ),
-        }));
-        return snap;
+        const r = addSnapshotMut(extract(get()), postId, snapshot);
+        set(r.state as Partial<StoreState>);
+        return r.snapshot;
       },
       removeSnapshot: (postId, snapshotId) =>
-        set((s) => ({
-          posts: s.posts.map((p) =>
-            p.id === postId
-              ? {
-                  ...p,
-                  snapshots: p.snapshots.filter((x) => x.id !== snapshotId),
-                  updatedAt: nowIso(),
-                }
-              : p,
-          ),
-        })),
-
-      addComment: (taskId, body) => {
-        const clean = body.trim();
-        if (!clean) return undefined;
-        const c: Comment = {
-          id: nanoid(6),
-          authorId: get().currentUserId,
-          body: clean,
-          createdAt: nowIso(),
-        };
-        set((s) => ({
-          tasks: s.tasks.map((t) =>
-            t.id === taskId
-              ? {
-                  ...t,
-                  comments: [...t.comments, c],
-                  activity: [
-                    ...t.activity,
-                    {
-                      id: nanoid(6),
-                      at: nowIso(),
-                      authorId: s.currentUserId,
-                      message: "Commented",
-                    },
-                  ],
-                }
-              : t,
-          ),
-        }));
-        return c;
-      },
+        apply(set, get, (s) => removeSnapshotMut(s, postId, snapshotId)),
     }),
     {
       name: "doodaboo-v1",
-      // Skip automatic rehydration so server and client both start from
-      // seed state; client explicitly rehydrates in <StoreHydration />
-      // after mount, avoiding React hydration mismatches.
       skipHydration: true,
       storage: createJSONStorage(() =>
         typeof window === "undefined"
@@ -461,6 +240,38 @@ export const useStore = create<StoreState>()(
     },
   ),
 );
+
+// Tiny inline adapters that thread the result tuple cleanly. Keeps the
+// store body shaped like the actions object the rest of the app uses.
+function addUserAdapter(s: WorkspaceState, u: Omit<User, "id">) {
+  const r = addUserMut(s, u);
+  return { state: r.state, result: r.user };
+}
+function addLabelAdapter(s: WorkspaceState, l: Omit<Label, "id">) {
+  const r = addLabelMut(s, l);
+  return { state: r.state, result: r.label };
+}
+function createProjectAdapter(
+  s: WorkspaceState,
+  data: Partial<Project> & Pick<Project, "name" | "key">,
+) {
+  const r = createProjectMut(s, data);
+  return { state: r.state, result: r.project };
+}
+function createTaskAdapter(
+  s: WorkspaceState,
+  data: Partial<Task> & Pick<Task, "projectId" | "title">,
+) {
+  const r = createTaskMut(s, data);
+  return { state: r.state, result: r.task };
+}
+function createPostAdapter(
+  s: WorkspaceState,
+  data: Partial<Post> & Pick<Post, "title" | "platform">,
+) {
+  const r = createPostMut(s, data);
+  return { state: r.state, result: r.post };
+}
 
 // Helpers
 export const selectProject = (id: string) => (s: StoreState) =>

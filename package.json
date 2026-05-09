@@ -11,12 +11,20 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css,md,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,md,json}\"",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx src/lib/virality.test.ts",
+    "test": "node --test --import tsx src/lib/virality.test.ts src/lib/mutations.test.ts src/lib/vault.test.ts",
     "e2e": "playwright test",
     "e2e:install": "playwright install chromium",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report",
-    "verify": "npm run typecheck && npm run lint && npm test"
+    "verify": "npm run typecheck && npm run lint && npm test",
+    "cli": "tsx cli/index.ts",
+    "doodaboo": "tsx cli/index.ts",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "bin": {
+    "doodaboo": "./bin/doodaboo.js"
   },
   "dependencies": {
     "clsx": "^2.1.1",

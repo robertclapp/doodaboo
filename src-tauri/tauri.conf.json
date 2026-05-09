@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Doodaboo",
+  "version": "0.1.0",
+  "identifier": "com.doodaboo.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:3000",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../.next/standalone"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Doodaboo",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 720,
+        "minHeight": 480,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "deb", "rpm", "appimage", "msi", "nsis"],
+    "category": "Productivity",
+    "shortDescription": "Brutalist project OS + virality predictor",
+    "longDescription": "Local-first project management combined with a multi-platform virality predictor for social posts. Self-host your own vault on disk.",
+    "icon": [
+      "icons/icon.png"
+    ]
+  }
+}

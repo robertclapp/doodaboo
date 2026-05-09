@@ -2,14 +2,20 @@
 
 Brutalist project OS with a multi-platform virality predictor.
 
-A single-user Next.js app that combines a Linear-style project and issue
-tracker with an in-app social-post composer that scores predicted virality
-across eight platforms before you publish, then refreshes the score from
-real engagement snapshots after launch.
+A local-first app that combines a Linear-style project and issue tracker
+with a social-post composer that scores predicted virality across eight
+platforms before you publish, then refreshes the score from engagement
+snapshots after launch.
 
-Everything lives in `localStorage`. There is no backend, no auth, no
-network call required to use the product end-to-end. Workspaces are
-exportable and importable as JSON.
+Three ways to run it — they all share the same data:
+
+- **Web app** (Next.js) — `npm run dev`, deploy to Vercel, or self-host.
+- **Desktop app** (Tauri) — `npm run tauri:dev`, ships a native binary.
+- **CLI** (`doodaboo`) — headless vault operations, scriptable, JSON-everywhere.
+
+Plus an HTTP API for integrations and a plugin system for extending
+the scoring engine, adding commands, mounting routes, and reacting to
+lifecycle events.
 
 ## Highlights
 
@@ -22,12 +28,21 @@ exportable and importable as JSON.
 - **Playbooks** — 8 curated growth recipes (3-second hook, X funnel,
   founder essay, carousel save-bait, …). Apply to any post and the
   composer previews the score delta before committing.
+- **Hook Lab** — generate 16 platform-aware hook variants from a
+  subject, pre-scored by the predictor, and stage A/B drafts in one
+  click.
 - **Compare** — up to four posts side-by-side with per-factor bars.
 - **Insights** — KPI strip, score-by-platform, day×hour posting-time
   heatmap, factor weakness leaderboard, recommendations roll-up.
 - **Dark mode** — CSS-variable tokens, system / light / dark.
 - **Mobile** — drawer-style sidebar, full-bleed content.
 - **Offline-first** — installable PWA via `manifest.webmanifest`.
+- **Vault on disk** — atomic writes, rolling backups, JSON +
+  markdown exports for Obsidian-style portability.
+- **Self-host or single-binary** — see [docs/desktop.md](docs/desktop.md).
+- **CLI + HTTP API** — see [docs/cli.md](docs/cli.md) and
+  [docs/api.md](docs/api.md).
+- **Plugin system** — see [docs/plugins.md](docs/plugins.md).
 
 ## Stack
 
