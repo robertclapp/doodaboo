@@ -45,8 +45,9 @@ async function list(argv: string[]): Promise<number> {
           p.key.toUpperCase() === values.project!.toUpperCase(),
       )
     : undefined;
+  const filterProject = proj;
   const tasks = state.tasks
-    .filter((t) => !proj || t.projectId === proj.id)
+    .filter((t) => !filterProject || t.projectId === filterProject.id)
     .filter((t) => !values.status || t.status === values.status)
     .filter((t) => !values.assignee || t.assigneeId === values.assignee);
 
@@ -62,9 +63,9 @@ async function list(argv: string[]): Promise<number> {
     `${row("ID", "STATUS", "PRIORITY", "TITLE")}\n`,
   );
   for (const t of tasks) {
-    const proj = state.projects.find((p) => p.id === t.projectId);
+    const taskProject = state.projects.find((p) => p.id === t.projectId);
     process.stdout.write(
-      `${row(`${proj?.key}-${t.number}`, t.status, t.priority, t.title)}\n`,
+      `${row(`${taskProject?.key}-${t.number}`, t.status, t.priority, t.title)}\n`,
     );
   }
   return 0;
@@ -156,15 +157,29 @@ async function setFields(argv: string[]): Promise<number> {
   });
   const ident = positionals[0];
   if (!ident) fail("Provide a task id or KEY-N.");
+  // Explicit empty / "none" / "unassigned" clears the assignee on the
+  // wire; omitting the flag leaves it unchanged.
+  const assigneeWasProvided = Object.prototype.hasOwnProperty.call(
+    values,
+    "assignee",
+  );
+  const clearsAssignee =
+    assigneeWasProvided &&
+    (values.assignee === "" ||
+      values.assignee === "none" ||
+      values.assignee === "unassigned");
   await withWorkspace((s) => {
     const task = resolveTask(s, ident);
+    const patch: Partial<Parameters<typeof updateTask>[2]> = {
+      status: values.status as Status | undefined,
+      priority: values.priority as Priority | undefined,
+      title: values.title,
+    };
+    if (assigneeWasProvided) {
+      patch.assigneeId = clearsAssignee ? undefined : values.assignee;
+    }
     return {
-      state: updateTask(s, task.id, {
-        status: values.status as Status | undefined,
-        priority: values.priority as Priority | undefined,
-        assigneeId: values.assignee,
-        title: values.title,
-      }),
+      state: updateTask(s, task.id, patch),
       result: undefined,
     };
   }, vaultRoot(values));

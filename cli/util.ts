@@ -35,21 +35,6 @@ export function vaultRoot(values: { vault?: string }): string {
   return values.vault ?? defaultVaultRoot();
 }
 
-export function emit(json: boolean | undefined, payload: unknown, lines: () => string): void {
-  if (json) {
-    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
-  } else {
-    process.stdout.write(`${lines()}\n`);
-  }
-}
-
-export function require<T>(v: T | undefined, name: string): T {
-  if (v === undefined || v === null) {
-    throw new UsageError(`Missing required option: --${name}`);
-  }
-  return v;
-}
-
 export class UsageError extends Error {
   constructor(message: string) {
     super(message);
@@ -59,6 +44,45 @@ export class UsageError extends Error {
 
 export function fail(message: string): never {
   throw new UsageError(message);
+}
+
+/**
+ * Coerce a CLI flag to a finite, non-negative number or throw with a
+ * helpful message. Catches typos like `--at=foo` (NaN), `--at=` (empty
+ * string would coerce to 0 silently otherwise), negative counts, and
+ * Infinity before they reach the vault.
+ */
+export function nonneg(raw: string | undefined, flag: string): number {
+  if (raw === undefined || raw === "") {
+    fail(`Missing required flag: --${flag}`);
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    fail(`--${flag} must be a finite number; got "${raw}".`);
+  }
+  if (n < 0) {
+    fail(`--${flag} must be non-negative; got ${n}.`);
+  }
+  return n;
+}
+
+export function bounded(
+  raw: string | undefined,
+  flag: string,
+  min: number,
+  max: number,
+): number {
+  if (raw === undefined || raw === "") {
+    fail(`Missing required flag: --${flag}`);
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    fail(`--${flag} must be a finite number; got "${raw}".`);
+  }
+  if (n < min || n > max) {
+    fail(`--${flag} must be between ${min} and ${max}; got ${n}.`);
+  }
+  return n;
 }
 
 const PAD = 22;

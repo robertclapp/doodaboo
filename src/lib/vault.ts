@@ -1,4 +1,5 @@
 import { promises as fs, watch as fsWatch } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
 import path from "node:path";
 import os from "node:os";
 import {
@@ -145,9 +146,83 @@ export async function saveWorkspace(
 }
 
 /**
+ * In-process mutex, queued per vault root. Prevents two awaits-in-the-
+ * same-process (e.g. two concurrent API requests) from racing.
+ */
+const vaultLocks = new Map<string, Promise<unknown>>();
+
+function withInProcessLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const previous = vaultLocks.get(key) ?? Promise.resolve();
+  const next = previous.then(fn, fn);
+  const tail = next.catch(() => undefined);
+  vaultLocks.set(key, tail);
+  tail.finally(() => {
+    if (vaultLocks.get(key) === tail) vaultLocks.delete(key);
+  });
+  return next;
+}
+
+/**
+ * Cross-process file lock. Independent CLI invocations and a running
+ * `doodaboo serve` would otherwise race the in-process mutex (each
+ * process has its own `vaultLocks` Map). We acquire an exclusive
+ * lock via `fs.open(...'wx')` — POSIX-atomic create-or-fail — and
+ * spin with backoff on EEXIST. Stale locks from a crashed process
+ * are reaped after `STALE_LOCK_MS`.
+ */
+const LOCK_RETRY_MS = 25;
+const LOCK_MAX_WAIT_MS = 5_000;
+const STALE_LOCK_MS = 30_000;
+
+async function acquireFileLock(lockPath: string): Promise<() => Promise<void>> {
+  const start = Date.now();
+  await fs.mkdir(path.dirname(lockPath), { recursive: true });
+  while (true) {
+    try {
+      const handle = await fs.open(lockPath, "wx");
+      await handle.writeFile(`${process.pid}\n${new Date().toISOString()}\n`);
+      await handle.close();
+      return async () => {
+        try {
+          await fs.unlink(lockPath);
+        } catch {
+          // Best-effort: stale-lock cleanup will pick it up.
+        }
+      };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      // Reap stale locks left by crashed processes so we don't wait
+      // forever after a SIGKILL.
+      try {
+        const stat = await fs.stat(lockPath);
+        if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) {
+          await fs.unlink(lockPath).catch(() => undefined);
+          continue;
+        }
+      } catch {
+        // Lock file vanished between EEXIST and stat — retry.
+        continue;
+      }
+      if (Date.now() - start > LOCK_MAX_WAIT_MS) {
+        throw new Error(
+          `Timed out waiting for vault lock at ${lockPath}. Another doodaboo process may be stuck.`,
+        );
+      }
+      await sleep(LOCK_RETRY_MS + Math.floor(Math.random() * 25));
+    }
+  }
+}
+
+/**
  * Runs `mutator(current)` against the on-disk workspace, then saves
- * the result. This is the atomic primitive every CLI command + API
- * route should use; it loads, mutates, and writes in a single call.
+ * the result. Serialised per vault root by both an in-process queue
+ * (for fast intra-process awaits) and a `<vault>/.lock` file (for
+ * inter-process safety between CLI invocations and a running
+ * `doodaboo serve`). Without these, two readers can each take a
+ * `current`, both mutate, and the second `saveWorkspace` clobbers the
+ * first edit. The temp-file-and-rename strategy in `saveWorkspace`
+ * only guards against torn files on disk; it does not prevent lost
+ * updates.
  */
 export async function withWorkspace<T>(
   mutator: (state: WorkspaceState) => Promise<{
@@ -156,10 +231,19 @@ export async function withWorkspace<T>(
   }> | { state: WorkspaceState; result: T },
   root = defaultVaultRoot(),
 ): Promise<T> {
-  const current = await loadWorkspace(root);
-  const next = await mutator(current);
-  await saveWorkspace(next.state, root);
-  return next.result;
+  const key = path.resolve(root);
+  const lockPath = path.join(key, ".lock");
+  return withInProcessLock(key, async () => {
+    const release = await acquireFileLock(lockPath);
+    try {
+      const current = await loadWorkspace(root);
+      const next = await mutator(current);
+      await saveWorkspace(next.state, root);
+      return next.result;
+    } finally {
+      await release();
+    }
+  });
 }
 
 /**
@@ -194,7 +278,16 @@ export function watchWorkspace(
 
 // ── Migrations ──────────────────────────────────────────────────────────────
 
-function migrate(input: unknown): WorkspaceState {
+/**
+ * `migrate` is the only path that produces a `WorkspaceState` from
+ * untrusted JSON. It throws on obvious corruption and backfills
+ * structurally incomplete records so downstream code can assume every
+ * `task.comments`, `task.activity`, `task.labelIds`, `post.snapshots`,
+ * `project.memberIds` etc. is at least an empty array — never
+ * `undefined`. The `import` CLI and `PUT /api/workspace` both route
+ * client-supplied JSON through here, not just `loadWorkspace`.
+ */
+export function migrate(input: unknown): WorkspaceState {
   if (!input || typeof input !== "object") {
     throw new VaultCorruptError("workspace.json root is not an object");
   }
@@ -207,15 +300,11 @@ function migrate(input: unknown): WorkspaceState {
     );
   }
 
-  // No migrations required yet — version 1 is the only supported shape.
-  // When the schema evolves, add migration steps here keyed on `version`.
-  if (version !== WORKSPACE_VERSION) {
-    obj.version = WORKSPACE_VERSION;
-  }
+  // No version-keyed migration steps yet — version 1 is the only
+  // supported shape. When the schema evolves, key migrations here.
+  obj.version = WORKSPACE_VERSION;
 
-  // Defensive: backfill arrays so a hand-edited vault that dropped a
-  // field doesn't crash the consumer.
-  const backfill = <K extends keyof WorkspaceState>(
+  const backfillArray = <K extends keyof WorkspaceState>(
     key: K,
     fallback: WorkspaceState[K],
   ): void => {
@@ -223,19 +312,91 @@ function migrate(input: unknown): WorkspaceState {
       (obj as unknown as WorkspaceState)[key] = fallback;
     }
   };
-  backfill("users", []);
-  backfill("labels", []);
-  backfill("projects", []);
-  backfill("tasks", []);
-  backfill("posts", []);
+  backfillArray("users", []);
+  backfillArray("labels", []);
+  backfillArray("projects", []);
+  backfillArray("tasks", []);
+  backfillArray("posts", []);
 
-  if (typeof obj.theme !== "string") obj.theme = "system";
-  if (typeof obj.currentUserId !== "string") {
-    const users = (obj as unknown as WorkspaceState).users;
-    obj.currentUserId = users[0]?.id ?? "u_unknown";
+  // Nested shape backfills — guard against hand-edited or partial JSON
+  // that lost a field. Doing this once at the trust boundary means
+  // mutations/UI can assume the invariants below hold.
+  const state = obj as unknown as WorkspaceState;
+  for (const project of state.projects) {
+    if (!Array.isArray(project.memberIds)) project.memberIds = [];
+    if (typeof project.nextTaskNumber !== "number") {
+      const max = state.tasks
+        .filter((t) => t.projectId === project.id)
+        .reduce((m, t) => Math.max(m, t.number), 0);
+      project.nextTaskNumber = max + 1;
+    }
+  }
+  for (const task of state.tasks) {
+    if (!Array.isArray(task.labelIds)) task.labelIds = [];
+    if (!Array.isArray(task.comments)) task.comments = [];
+    if (!Array.isArray(task.activity)) task.activity = [];
+  }
+  for (const post of state.posts) {
+    if (!Array.isArray(post.snapshots)) post.snapshots = [];
+    if (!post.content || typeof post.content !== "object") {
+      post.content = {
+        hook: "",
+        caption: "",
+        hashtags: [],
+        transcript: "",
+        format: "video",
+        hasTrendingAudio: false,
+      };
+    } else if (!Array.isArray(post.content.hashtags)) {
+      post.content.hashtags = [];
+    }
+    // Validate snapshot numeric fields. The addSnapshot mutation already
+    // guards live writes, but `import` and hand-edited vault files reach
+    // this point with the JSON deserialized as-is — non-finite values
+    // would propagate to scoreLive and crash it. We coerce non-finite
+    // numeric fields to 0 rather than silently dropping the snapshot so
+    // the user can still see and fix the post.
+    for (const snap of post.snapshots) {
+      const bag = snap as unknown as Record<string, unknown>;
+      const requireFinite = (k: keyof typeof snap) => {
+        const v = bag[k as string];
+        if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
+          bag[k as string] = 0;
+        }
+      };
+      requireFinite("atMinutes");
+      requireFinite("impressions");
+      requireFinite("views");
+      requireFinite("likes");
+      requireFinite("comments");
+      requireFinite("shares");
+      requireFinite("saves");
+      if (
+        snap.retentionPct != null &&
+        (typeof snap.retentionPct !== "number" ||
+          !Number.isFinite(snap.retentionPct) ||
+          snap.retentionPct < 0 ||
+          snap.retentionPct > 100)
+      ) {
+        snap.retentionPct = undefined;
+      }
+      if (
+        snap.watchTimeAvgSec != null &&
+        (typeof snap.watchTimeAvgSec !== "number" ||
+          !Number.isFinite(snap.watchTimeAvgSec) ||
+          snap.watchTimeAvgSec < 0)
+      ) {
+        snap.watchTimeAvgSec = undefined;
+      }
+    }
   }
 
-  return obj as unknown as WorkspaceState;
+  if (typeof obj.theme !== "string") obj.theme = "system";
+  if (typeof obj.currentUserId !== "string" || !obj.currentUserId) {
+    obj.currentUserId = state.users[0]?.id ?? "u_unknown";
+  }
+
+  return state;
 }
 
 export class VaultNotFoundError extends Error {

@@ -12,17 +12,35 @@ import type {
 
 const MANIFEST = "plugin.json";
 
+/**
+ * In-process cache so a hot API route doesn't readdir + dynamic-import
+ * every plugin on every request. Invalidates whenever the plugins
+ * directory's mtime changes, so `doodaboo plugin scaffold` or a manual
+ * edit picks up without a server restart.
+ */
+const cache = new Map<
+  string,
+  { mtimeMs: number; entries: { plugin: Plugin; ctx: PluginContext }[] }
+>();
+
 /** Discover and load every plugin folder under `<vault>/plugins/`. */
 export async function loadPlugins(
   root?: string,
 ): Promise<{ plugin: Plugin; ctx: PluginContext }[]> {
   const paths = vaultPaths(root);
   let dirents: import("node:fs").Dirent[];
+  let mtimeMs = 0;
   try {
     dirents = await fs.readdir(paths.pluginsDir, { withFileTypes: true });
+    const stat = await fs.stat(paths.pluginsDir);
+    mtimeMs = stat.mtimeMs;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
+  }
+  const cached = cache.get(paths.pluginsDir);
+  if (cached && cached.mtimeMs === mtimeMs) {
+    return cached.entries;
   }
   const plugins: { plugin: Plugin; ctx: PluginContext }[] = [];
   for (const dirent of dirents) {
@@ -40,6 +58,7 @@ export async function loadPlugins(
       );
     }
   }
+  cache.set(paths.pluginsDir, { mtimeMs, entries: plugins });
   return plugins;
 }
 

@@ -16,6 +16,16 @@ interface Params {
   params: Promise<{ taskId: string }>;
 }
 
+/**
+ * Server-side actor for activity-log attribution. Falls back to the
+ * workspace owner when the caller doesn't identify itself. When real
+ * auth lands, this header gets replaced by a session lookup.
+ */
+function actorFrom(req: Request): { actorId?: string } {
+  const id = req.headers.get("x-actor-id");
+  return id ? { actorId: id } : {};
+}
+
 export async function GET(_: Request, ctx: Params): Promise<Response> {
   return handle(async () => {
     const { taskId } = await ctx.params;
@@ -30,12 +40,13 @@ export async function PATCH(req: Request, ctx: Params): Promise<Response> {
   return handle(async () => {
     const { taskId } = await ctx.params;
     const body = await safeJson<Partial<Task> & { comment?: string }>(req);
+    const actor = actorFrom(req);
     const task = await mutateWorkspace((s) => {
       const exists = s.tasks.find((t) => t.id === taskId);
       if (!exists) throw new ApiError(404, "Task not found");
-      let next = updateTask(s, taskId, body);
+      let next = updateTask(s, taskId, body, actor);
       if (body.comment) {
-        const r = addComment(next, taskId, body.comment);
+        const r = addComment(next, taskId, body.comment, actor);
         next = r.state;
       }
       return {

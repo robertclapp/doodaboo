@@ -38,7 +38,7 @@ export async function runExport(argv: string[]): Promise<number> {
         ``,
       ].join("\n");
       await fs.writeFile(
-        path.join(dir, "projects", `${project.key}.md`),
+        path.join(dir, "projects", `${safeFilename(project.key)}.md`),
         md,
         "utf-8",
       );
@@ -86,7 +86,7 @@ export async function runExport(argv: string[]): Promise<number> {
         .filter((l) => l !== "")
         .join("\n");
       await fs.writeFile(
-        path.join(dir, "posts", `${post.id}.md`),
+        path.join(dir, "posts", `${safeFilename(post.id)}.md`),
         md,
         "utf-8",
       );
@@ -106,4 +106,22 @@ export async function runExport(argv: string[]): Promise<number> {
   await fs.writeFile(target, JSON.stringify(state, null, 2), "utf-8");
   process.stdout.write(`Exported to ${target}\n`);
   return 0;
+}
+
+/**
+ * Strip anything that could escape the destination directory or
+ * confuse the filesystem (path separators, drive letters, dotfiles,
+ * control characters). project.key and post.id come from the API
+ * surface where any string is currently accepted; without this we'd
+ * happily write `../../../etc/anything.md`.
+ */
+function safeFilename(raw: string): string {
+  const stripped = raw
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x1f\\/:*?"<>| ]/g, "_")
+    // Collapse every run of dots so neither leading dotfiles
+    // nor embedded ".." traversal segments survive.
+    .replace(/\.+/g, "_")
+    .trim();
+  return stripped.length > 0 ? stripped.slice(0, 80) : "unnamed";
 }

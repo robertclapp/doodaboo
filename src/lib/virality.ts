@@ -324,7 +324,15 @@ function sentimentQuality(sentiment: string): number {
 
 // ── Score assembly ───────────────────────────────────────────────────────────
 
-export function scoreIntrinsic(post: Post): ViralityScore {
+/**
+ * `extraFactors` allows server-side callers (the API score endpoint, the
+ * CLI) to merge plugin-provided factors into the score. The browser
+ * always passes `undefined`; plugins live on the Node side only.
+ */
+export function scoreIntrinsic(
+  post: Post,
+  extraFactors?: ScoreFactor[],
+): ViralityScore {
   const p = PROFILES[post.platform];
   const c = post.content;
   const ctx = post.context;
@@ -358,13 +366,17 @@ export function scoreIntrinsic(post: Post): ViralityScore {
       "Strong-sentiment content outperforms neutral content."),
   ].filter((x) => x.weight > 0);
 
-  return assemble(factors, /* confidence */ 0.45);
+  const all = extraFactors ? [...factors, ...extraFactors] : factors;
+  return assemble(all, /* confidence */ 0.45);
 }
 
-export function scoreLive(post: Post): ViralityScore | undefined {
+export function scoreLive(
+  post: Post,
+  extraFactors?: ScoreFactor[],
+): ViralityScore | undefined {
   if (post.snapshots.length === 0) return undefined;
   const p = PROFILES[post.platform];
-  const intrinsic = scoreIntrinsic(post);
+  const intrinsic = scoreIntrinsic(post, extraFactors);
   const latest = [...post.snapshots].sort((a, b) => a.atMinutes - b.atMinutes).slice(-1)[0];
   const prev = post.snapshots.length > 1
     ? [...post.snapshots].sort((a, b) => a.atMinutes - b.atMinutes).slice(-2, -1)[0]
@@ -519,8 +531,12 @@ export interface Recommendation {
  * Only intrinsic factors are recommendable (live engagement isn't something
  * you can edit retroactively). Sorted by potential gain, capped at `max`.
  */
-export function recommend(post: Post, max = 4): Recommendation[] {
-  const score = scoreIntrinsic(post);
+export function recommend(
+  post: Post,
+  max = 4,
+  extraFactors?: ScoreFactor[],
+): Recommendation[] {
+  const score = scoreIntrinsic(post, extraFactors);
   const profile = PROFILES[post.platform];
   const out: Recommendation[] = [];
 

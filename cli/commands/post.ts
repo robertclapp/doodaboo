@@ -5,7 +5,7 @@ import {
   duplicatePost,
   updatePost,
 } from "../../src/lib/mutations.js";
-import { parseArgs, vaultRoot, fail, row } from "../util.js";
+import { bounded, fail, nonneg, parseArgs, row, vaultRoot } from "../util.js";
 import { Platform, Post, PostFormat, PostStatus } from "../../src/lib/types.js";
 import {
   describeBand,
@@ -245,19 +245,27 @@ async function snap(argv: string[]): Promise<number> {
   if (!id) fail("Provide a post id.");
   if (!values.at) fail("Provide --at=<minutes since launch>.");
 
+  // Numeric coercion at the CLI boundary. Without this, `--at=foo` would
+  // sail past `Number(...)` as NaN, JSON-serialize as null on disk, and
+  // crash scoreLive later. nonneg() also rejects negatives + infinities.
+  const atMinutes = nonneg(values.at, "at");
   const snapshot = await withWorkspace((s) => {
     const post = s.posts.find((p) => p.id === id);
     if (!post) fail(`No post ${id}.`);
     const r = addSnapshot(s, id, {
-      atMinutes: Number(values.at),
-      impressions: Number(values.impressions ?? 0),
-      views: Number(values.views ?? 0),
-      likes: Number(values.likes ?? 0),
-      comments: Number(values.comments ?? 0),
-      shares: Number(values.shares ?? 0),
-      saves: Number(values.saves ?? 0),
-      retentionPct: values.retention ? Number(values.retention) : undefined,
-      watchTimeAvgSec: values.watch ? Number(values.watch) : undefined,
+      atMinutes,
+      impressions: nonneg(values.impressions ?? "0", "impressions"),
+      views: nonneg(values.views ?? "0", "views"),
+      likes: nonneg(values.likes ?? "0", "likes"),
+      comments: nonneg(values.comments ?? "0", "comments"),
+      shares: nonneg(values.shares ?? "0", "shares"),
+      saves: nonneg(values.saves ?? "0", "saves"),
+      retentionPct:
+        values.retention !== undefined
+          ? bounded(values.retention, "retention", 0, 100)
+          : undefined,
+      watchTimeAvgSec:
+        values.watch !== undefined ? nonneg(values.watch, "watch") : undefined,
     });
     return { state: r.state, result: r.snapshot };
   }, vaultRoot(values));

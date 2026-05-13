@@ -27,6 +27,7 @@
     "doodaboo": "./bin/doodaboo.js"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.11.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.454.0",
     "nanoid": "^5.0.7",

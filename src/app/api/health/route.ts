@@ -1,5 +1,6 @@
 import { ensureVault, json } from "@/lib/api";
 import { defaultVaultRoot } from "@/lib/vault";
+import { WORKSPACE_VERSION } from "@/lib/mutations";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,6 @@ export async function GET(): Promise<Response> {
     ok: status.ok,
     reason: status.reason,
     vault: defaultVaultRoot(),
-    version: 1,
+    version: WORKSPACE_VERSION,
   });
 }

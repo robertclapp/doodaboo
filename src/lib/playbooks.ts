@@ -273,7 +273,12 @@ export function applyPlaybook(post: Post, playbook: Playbook): ApplyResult {
     captionEmpty: post.content.caption.trim() === "",
   };
 
-  const content: PostContent = { ...post.content, ...playbook.contentDefaults };
+  // Start from the user's content untouched. The previous version
+  // spread `...playbook.contentDefaults` on top, which silently flipped
+  // `hasTrendingAudio` for any user who'd explicitly set it false — the
+  // toast then claimed no changes were made. Layer each field with its
+  // own rule below so the change log reflects reality.
+  const content: PostContent = { ...post.content };
   if (before.hookEmpty && playbook.hookHint) {
     content.hook = playbook.hookHint;
     changes.push("Filled in suggested hook");
@@ -313,29 +318,26 @@ export function applyPlaybook(post: Post, playbook: Playbook): ApplyResult {
     changes.push("Marked as riding a trending audio");
   }
 
-  const context: PostContext = { ...post.context, ...playbook.contextDefaults };
-  // Only nudge posting time if the user is currently outside the platform's
-  // peak window — otherwise keep their explicit choice.
+  // Start from the user's context — we'll layer in playbook defaults
+  // explicitly per field so an over-eager spread can't quietly clobber
+  // explicit choices. Each rule below either preserves the user's value
+  // or replaces it with a recorded change message.
+  const context: PostContext = { ...post.context };
+  const defaults = playbook.contextDefaults ?? {};
+
   const userOutsidePeak =
     !profile.peakHours.includes(post.context.postingHour) ||
     !profile.peakDays.includes(post.context.dayOfWeek);
-  if (userOutsidePeak && playbook.contextDefaults?.postingHour != null) {
-    context.postingHour = playbook.contextDefaults.postingHour;
-    if (playbook.contextDefaults.dayOfWeek != null) {
-      context.dayOfWeek = playbook.contextDefaults.dayOfWeek;
+  if (userOutsidePeak && defaults.postingHour != null) {
+    context.postingHour = defaults.postingHour;
+    if (defaults.dayOfWeek != null) {
+      context.dayOfWeek = defaults.dayOfWeek;
     }
     changes.push("Shifted posting time into peak window");
-  } else if (
-    !userOutsidePeak &&
-    playbook.contextDefaults?.postingHour != null
-  ) {
-    // User is already in a peak slot — keep theirs, but don't quietly override.
-    context.postingHour = post.context.postingHour;
-    context.dayOfWeek = post.context.dayOfWeek;
   }
 
   for (const key of ["novelty", "emotion", "trendMatch"] as const) {
-    const target = playbook.contextDefaults?.[key];
+    const target = defaults[key];
     if (target != null && post.context[key] < target) {
       context[key] = target;
       changes.push(`Bumped ${key} to ${target}`);

@@ -5,14 +5,22 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
-/// Default vault location: $DOODABOO_VAULT or ~/.doodaboo.
-fn default_vault_root() -> PathBuf {
+const MAX_BACKUPS: usize = 20;
+
+/// Default vault location: $DOODABOO_VAULT or ~/.doodaboo. Surfaces an
+/// error to the caller when the home directory can't be resolved
+/// instead of silently scaffolding a vault in the current working dir
+/// (which would put user data somewhere random next to the binary).
+fn default_vault_root() -> Result<PathBuf, String> {
     if let Ok(env) = std::env::var("DOODABOO_VAULT") {
-        return PathBuf::from(env);
+        return Ok(PathBuf::from(env));
     }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".doodaboo")
+    match dirs::home_dir() {
+        Some(home) => Ok(home.join(".doodaboo")),
+        None => Err(
+            "Couldn't resolve $HOME. Set DOODABOO_VAULT to an explicit path.".into(),
+        ),
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -35,15 +43,15 @@ fn vault_paths(root: PathBuf) -> VaultPaths {
 }
 
 #[tauri::command]
-fn vault_root() -> VaultPaths {
-    vault_paths(default_vault_root())
+fn vault_root() -> Result<VaultPaths, String> {
+    Ok(vault_paths(default_vault_root()?))
 }
 
 /// Read the vault's workspace.json. Returns null when no vault exists yet
 /// so the front-end can render an onboarding screen instead of crashing.
 #[tauri::command]
 fn vault_load() -> Result<Option<serde_json::Value>, String> {
-    let path = default_vault_root().join("workspace.json");
+    let path = default_vault_root()?.join("workspace.json");
     match fs::read_to_string(&path) {
         Ok(raw) => serde_json::from_str(&raw)
             .map(Some)
@@ -58,7 +66,7 @@ fn vault_load() -> Result<Option<serde_json::Value>, String> {
 /// src/lib/vault.ts.
 #[tauri::command]
 fn vault_save(state: serde_json::Value) -> Result<(), String> {
-    let root = default_vault_root();
+    let root = default_vault_root()?;
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     let target = root.join("workspace.json");
     let tmp = root.join(format!("workspace.json.tmp-{}", std::process::id()));
@@ -66,17 +74,52 @@ fn vault_save(state: serde_json::Value) -> Result<(), String> {
     fs::write(&tmp, &payload).map_err(|e| e.to_string())?;
     fs::rename(&tmp, &target).map_err(|e| e.to_string())?;
 
-    // Best-effort rolling backup.
+    // Best-effort rolling backup, parallel to Node's saveWorkspace.
     let backups = root.join("backups");
-    let _ = fs::create_dir_all(&backups);
-    let stamp = chrono_like_stamp();
-    let _ = fs::write(backups.join(format!("workspace-{stamp}.json")), &payload);
+    if let Err(err) = fs::create_dir_all(&backups) {
+        eprintln!("[doodaboo] backup dir creation failed: {err}");
+    } else {
+        let stamp = chrono_like_stamp();
+        if let Err(err) = fs::write(
+            backups.join(format!("workspace-{stamp}.json")),
+            &payload,
+        ) {
+            eprintln!("[doodaboo] backup write failed: {err}");
+        }
+        // Trim oldest backups beyond MAX_BACKUPS. Node trims; Rust used to
+        // grow the backups folder indefinitely on long-running desktop
+        // sessions.
+        if let Err(err) = trim_backups(&backups) {
+            eprintln!("[doodaboo] backup trim failed: {err}");
+        }
+    }
+    Ok(())
+}
+
+fn trim_backups(dir: &PathBuf) -> std::io::Result<()> {
+    let mut entries: Vec<_> = fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .map(|n| n.starts_with("workspace-") && n.ends_with(".json"))
+                .unwrap_or(false)
+        })
+        .collect();
+    if entries.len() <= MAX_BACKUPS {
+        return Ok(());
+    }
+    entries.sort_by_key(|e| e.file_name());
+    let to_remove = entries.len() - MAX_BACKUPS;
+    for entry in entries.into_iter().take(to_remove) {
+        let _ = fs::remove_file(entry.path());
+    }
     Ok(())
 }
 
 #[tauri::command]
 fn vault_init() -> Result<VaultPaths, String> {
-    let root = default_vault_root();
+    let root = default_vault_root()?;
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     fs::create_dir_all(root.join("backups")).map_err(|e| e.to_string())?;
     fs::create_dir_all(root.join("plugins")).map_err(|e| e.to_string())?;
@@ -130,15 +173,21 @@ pub fn run() {
             vault_init
         ])
         .setup(|app| {
-            // Make sure the vault scaffolding exists on first launch.
-            if let Err(err) = vault_init() {
-                eprintln!("[doodaboo] vault_init failed at startup: {err}");
-            }
-            // Window setup is delegated to tauri.conf.json. Surface the
-            // resolved vault root in the window title for clarity.
-            if let Some(window) = app.get_webview_window("main") {
-                let paths = vault_root();
-                let _ = window.set_title(&format!("Doodaboo — {}", paths.root));
+            // Scaffold the vault on first launch. We surface the
+            // failure mode rather than silently scaffold inside the
+            // app's CWD when no home directory is available.
+            match vault_init() {
+                Ok(paths) => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window
+                            .set_title(&format!("Doodaboo — {}", paths.root));
+                    }
+                }
+                Err(err) => {
+                    eprintln!(
+                        "[doodaboo] vault unavailable: {err}. The app will run but reads/writes will fail until DOODABOO_VAULT is set."
+                    );
+                }
             }
             Ok(())
         })

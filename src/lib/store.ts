@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { createTauriStorage, isTauri } from "./tauri-storage";
 import {
   Comment,
   EngagementSnapshot,
@@ -220,11 +221,16 @@ export const useStore = create<StoreState>()(
     {
       name: "doodaboo-v1",
       skipHydration: true,
-      storage: createJSONStorage(() =>
-        typeof window === "undefined"
-          ? (undefined as unknown as Storage)
-          : window.localStorage,
-      ),
+      // Inside Tauri's webview, persist routes through Rust commands so
+      // the desktop app reads/writes the on-disk vault directly. On the
+      // web, it falls back to localStorage.
+      storage: isTauri()
+        ? createTauriStorage()
+        : createJSONStorage(() =>
+            typeof window === "undefined"
+              ? (undefined as unknown as Storage)
+              : window.localStorage,
+          ),
       partialize: (s) => ({
         theme: s.theme,
         currentUserId: s.currentUserId,

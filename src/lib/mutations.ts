@@ -169,15 +169,27 @@ export function deleteProject(
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
 
+/**
+ * `actorId` lets server-side callers (API routes acting on behalf of a
+ * specific user) attribute activity entries correctly instead of always
+ * blaming the workspace owner. Browser/CLI callers pass nothing and the
+ * mutation falls back to `state.currentUserId`.
+ */
+export interface ActorContext {
+  actorId?: string;
+}
+
 export function createTask(
   state: WorkspaceState,
   data: Partial<Task> & Pick<Task, "projectId" | "title">,
+  ctx: ActorContext = {},
 ): { state: WorkspaceState; task: Task } {
   const project = state.projects.find((p) => p.id === data.projectId);
   if (!project) {
     throw new Error(`Cannot create task: project ${data.projectId} not found`);
   }
   const number = project.nextTaskNumber;
+  const actor = ctx.actorId ?? state.currentUserId;
   const task: Task = {
     id: `t_${nanoid(6)}`,
     projectId: data.projectId,
@@ -198,7 +210,7 @@ export function createTask(
       {
         id: nanoid(6),
         at: nowIso(),
-        authorId: state.currentUserId,
+        authorId: actor,
         message: `Created ${data.type ?? "task"}`,
       },
     ],
@@ -221,15 +233,17 @@ export function updateTask(
   state: WorkspaceState,
   id: string,
   patch: Partial<Task>,
+  ctx: ActorContext = {},
 ): WorkspaceState {
   const existing = state.tasks.find((t) => t.id === id);
   if (!existing) return state;
+  const actor = ctx.actorId ?? state.currentUserId;
   const entries: ActivityEntry[] = [];
   if (patch.status && patch.status !== existing.status) {
     entries.push({
       id: nanoid(6),
       at: nowIso(),
-      authorId: state.currentUserId,
+      authorId: actor,
       message: `Status → ${patch.status.replace("_", " ")}`,
     });
   }
@@ -237,20 +251,30 @@ export function updateTask(
     entries.push({
       id: nanoid(6),
       at: nowIso(),
-      authorId: state.currentUserId,
+      authorId: actor,
       message: `Priority → ${patch.priority}`,
     });
   }
-  if (
-    patch.assigneeId !== undefined &&
-    patch.assigneeId !== existing.assigneeId
-  ) {
-    const u = state.users.find((x) => x.id === patch.assigneeId);
+  // assigneeId === null is the wire signal for "unassign". Browser
+  // doesn't send null (uses undefined), but the API supports it so a
+  // PATCH with `{assigneeId: null}` clears the assignment.
+  const wantsAssigneeChange =
+    Object.prototype.hasOwnProperty.call(patch, "assigneeId") &&
+    patch.assigneeId !== existing.assigneeId;
+  if (wantsAssigneeChange) {
+    const nextAssignee = patch.assigneeId ?? undefined;
+    const u = nextAssignee
+      ? state.users.find((x) => x.id === nextAssignee)
+      : undefined;
     entries.push({
       id: nanoid(6),
       at: nowIso(),
-      authorId: state.currentUserId,
-      message: u ? `Assigned to @${u.handle}` : "Unassigned",
+      authorId: actor,
+      message: u
+        ? `Assigned to @${u.handle}`
+        : nextAssignee
+          ? `Assigned to ${nextAssignee}`
+          : "Unassigned",
     });
   }
   return {
@@ -279,20 +303,23 @@ export function moveTaskStatus(
   state: WorkspaceState,
   id: string,
   status: Status,
+  ctx: ActorContext = {},
 ): WorkspaceState {
-  return updateTask(state, id, { status });
+  return updateTask(state, id, { status }, ctx);
 }
 
 export function addComment(
   state: WorkspaceState,
   taskId: string,
   body: string,
+  ctx: ActorContext = {},
 ): { state: WorkspaceState; comment: Comment | undefined } {
   const clean = body.trim();
   if (!clean) return { state, comment: undefined };
+  const actor = ctx.actorId ?? state.currentUserId;
   const comment: Comment = {
     id: nanoid(6),
-    authorId: state.currentUserId,
+    authorId: actor,
     body: clean,
     createdAt: nowIso(),
   };
@@ -309,7 +336,7 @@ export function addComment(
                 {
                   id: nanoid(6),
                   at: nowIso(),
-                  authorId: state.currentUserId,
+                  authorId: actor,
                   message: "Commented",
                 },
               ],
@@ -417,6 +444,39 @@ export function addSnapshot(
   postId: string,
   snapshot: Omit<EngagementSnapshot, "id" | "capturedAt">,
 ): { state: WorkspaceState; snapshot: EngagementSnapshot } {
+  // Reject NaN/Infinity/negative inputs before they hit disk. The CLI
+  // and API both go through here, so this is the single chokepoint
+  // that guarantees engagement math doesn't divide by garbage.
+  const requireNonneg = (k: keyof typeof snapshot, allowOptional = false) => {
+    const v = snapshot[k];
+    if (v == null) {
+      if (allowOptional) return;
+      throw new Error(`addSnapshot: ${k} is required`);
+    }
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
+      throw new Error(
+        `addSnapshot: ${k} must be a finite non-negative number; got ${String(v)}`,
+      );
+    }
+  };
+  requireNonneg("atMinutes");
+  requireNonneg("impressions");
+  requireNonneg("views");
+  requireNonneg("likes");
+  requireNonneg("comments");
+  requireNonneg("shares");
+  requireNonneg("saves");
+  requireNonneg("retentionPct", true);
+  requireNonneg("watchTimeAvgSec", true);
+  if (
+    snapshot.retentionPct != null &&
+    (snapshot.retentionPct > 100 || snapshot.retentionPct < 0)
+  ) {
+    throw new Error(
+      `addSnapshot: retentionPct must be in 0..100; got ${snapshot.retentionPct}`,
+    );
+  }
+
   const snap: EngagementSnapshot = {
     id: nanoid(6),
     capturedAt: nowIso(),
