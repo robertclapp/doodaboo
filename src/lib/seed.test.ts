@@ -233,4 +233,60 @@ describe("seedTasks invariants", () => {
     const ids = new Set(seedTasks.map((t) => t.id));
     assert.equal(ids.size, seedTasks.length);
   });
+
+  it("all task ids are t_-prefixed", () => {
+    for (const t of seedTasks) assert.match(t.id, /^t_/);
+  });
+});
+
+describe("seedProjects + seedPosts value-range invariants", () => {
+  it("all project ids are p_-prefixed", () => {
+    for (const p of seedProjects) assert.match(p.id, /^p_/);
+  });
+
+  it("every post platform is a declared Platform value", () => {
+    const valid = new Set([
+      "tiktok",
+      "reels",
+      "shorts",
+      "x",
+      "instagram_feed",
+      "linkedin",
+      "threads",
+      "facebook",
+    ]);
+    for (const p of seedPosts) {
+      assert.ok(valid.has(p.platform), `bad platform on ${p.id}`);
+    }
+  });
+
+  it("every post content.format is a valid PostFormat", () => {
+    const valid = new Set(["video", "image", "carousel", "text", "live"]);
+    for (const p of seedPosts) {
+      assert.ok(valid.has(p.content.format), `bad format on ${p.id}`);
+    }
+  });
+
+  it("post context numbers are in declared ranges", () => {
+    for (const p of seedPosts) {
+      const c = p.context;
+      assert.ok(c.postingHour >= 0 && c.postingHour <= 23);
+      assert.ok(c.dayOfWeek >= 0 && c.dayOfWeek <= 6);
+      assert.ok(c.novelty >= 1 && c.novelty <= 5);
+      assert.ok(c.emotion >= 1 && c.emotion <= 5);
+      assert.ok(c.trendMatch >= 1 && c.trendMatch <= 5);
+      assert.ok(
+        ["negative", "neutral", "positive", "controversial"].includes(
+          c.sentiment,
+        ),
+      );
+    }
+  });
+
+  it("user handles are non-empty strings without spaces", () => {
+    for (const u of seedUsers) {
+      assert.ok(u.handle.length > 0);
+      assert.ok(!/\s/.test(u.handle), `handle ${u.handle} has whitespace`);
+    }
+  });
 });

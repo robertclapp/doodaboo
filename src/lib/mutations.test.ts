@@ -287,6 +287,59 @@ describe("createProject (extended)", () => {
     assert.equal(r.project.leadId, "u_custom");
     assert.deepEqual(r.project.memberIds, ["u_a", "u_b"]);
   });
+
+  it("default accent is '#ff5c1a' and targetDate is undefined", () => {
+    const r = createProject(fresh(), { name: "X", key: "X" });
+    assert.equal(r.project.accent, "#ff5c1a");
+    assert.equal(r.project.targetDate, undefined);
+  });
+
+  it("respects a provided accent over the default", () => {
+    const r = createProject(fresh(), {
+      name: "X",
+      key: "X",
+      accent: "#abcdef",
+    });
+    assert.equal(r.project.accent, "#abcdef");
+  });
+});
+
+describe("no-op mutations on unknown ids", () => {
+  it("removeSnapshot is a no-op when snapshotId doesn't match", () => {
+    const s0 = fresh();
+    const post = s0.posts.find((p) => p.snapshots.length > 0)!;
+    const next = removeSnapshot(s0, post.id, "s_nope");
+    const updated = next.posts.find((p) => p.id === post.id)!;
+    assert.equal(updated.snapshots.length, post.snapshots.length);
+  });
+
+  it("removeSnapshot when postId is unknown leaves other posts untouched", () => {
+    const s0 = fresh();
+    const next = removeSnapshot(s0, "po_nope", "s_nope");
+    assert.equal(next.posts.length, s0.posts.length);
+    // Posts are deep-cloned via .map, so equality is by content, not identity.
+    assert.deepEqual(
+      next.posts.map((p) => p.id),
+      s0.posts.map((p) => p.id),
+    );
+  });
+
+  it("addComment for an unknown taskId returns the comment but no state change to other tasks", () => {
+    const s0 = fresh();
+    const r = addComment(s0, "t_nope", "hi");
+    // Comment is built (the function doesn't validate task existence
+    // before building the comment object); but the map runs the
+    // task-id === clause for every task, so nothing actually changes.
+    assert.ok(r.comment);
+    assert.equal(r.state.tasks.length, s0.tasks.length);
+    for (let i = 0; i < s0.tasks.length; i++) {
+      assert.equal(r.state.tasks[i].id, s0.tasks[i].id);
+      assert.equal(
+        r.state.tasks[i].comments.length,
+        s0.tasks[i].comments.length,
+      );
+    }
+  });
 });
 
 // ── New: updateProject / deleteProject ─────────────────────────────────────

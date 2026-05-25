@@ -1,6 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ApiError, error, handle, json, safeJson } from "./api";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  ApiError,
+  ensureVault,
+  error,
+  handle,
+  json,
+  safeJson,
+} from "./api";
+import { initVault } from "./vault";
 
 describe("json", () => {
   it("returns 200 with no-store cache header by default", async () => {
@@ -171,5 +182,44 @@ describe("json — serialization shapes", () => {
   it("serializes arrays", async () => {
     const res = json([1, 2, 3]);
     assert.deepEqual(await res.json(), [1, 2, 3]);
+  });
+
+  it("forwards 201 status with a body", async () => {
+    const res = json({ ok: true }, { status: 201 });
+    assert.equal(res.status, 201);
+    assert.deepEqual(await res.json(), { ok: true });
+  });
+});
+
+describe("ensureVault", () => {
+  let prev: string | undefined;
+  it("returns ok=true when the vault exists", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "doodaboo-api-"));
+    await initVault(root, { force: true });
+    prev = process.env.DOODABOO_VAULT;
+    process.env.DOODABOO_VAULT = root;
+    try {
+      const r = await ensureVault();
+      assert.equal(r.ok, true);
+    } finally {
+      if (prev === undefined) delete process.env.DOODABOO_VAULT;
+      else process.env.DOODABOO_VAULT = prev;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns ok=false with a reason when the vault is missing", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "doodaboo-api-"));
+    prev = process.env.DOODABOO_VAULT;
+    process.env.DOODABOO_VAULT = root;
+    try {
+      const r = await ensureVault();
+      assert.equal(r.ok, false);
+      assert.match(r.reason ?? "", /doodaboo init/);
+    } finally {
+      if (prev === undefined) delete process.env.DOODABOO_VAULT;
+      else process.env.DOODABOO_VAULT = prev;
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });

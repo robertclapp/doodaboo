@@ -256,4 +256,111 @@ describe("migrate (trust boundary)", () => {
     const s = migrate({ version: 0 });
     assert.equal(s.version, WORKSPACE_VERSION);
   });
+
+  it("backfills project.memberIds when missing", () => {
+    const s = migrate({
+      version: 1,
+      projects: [{ id: "p_x", key: "X", name: "X", nextTaskNumber: 1 }],
+    });
+    assert.deepEqual(s.projects[0].memberIds, []);
+  });
+
+  it("backfills post.content.hashtags when not an array", () => {
+    const s = migrate({
+      version: 1,
+      posts: [
+        {
+          id: "po_x",
+          title: "t",
+          platform: "tiktok",
+          content: {
+            hook: "",
+            caption: "",
+            hashtags: "not-an-array",
+            transcript: "",
+            format: "video",
+            hasTrendingAudio: false,
+          },
+          context: {},
+          threshold: { metric: "views", value: 1, window: "7d" },
+          snapshots: [],
+        },
+      ],
+    });
+    assert.deepEqual(s.posts[0].content.hashtags, []);
+  });
+
+  it("recomputes nextTaskNumber=1 when project has no tasks", () => {
+    const s = migrate({
+      version: 1,
+      projects: [{ id: "p_empty", key: "E", name: "E" }],
+      tasks: [],
+    });
+    assert.equal(s.projects[0].nextTaskNumber, 1);
+  });
+
+  it("preserves currentUserId when it is a non-empty known string", () => {
+    const s = migrate({
+      version: 1,
+      currentUserId: "u_known",
+      users: [{ id: "u_known", name: "K", handle: "k", color: "#000" }],
+    });
+    assert.equal(s.currentUserId, "u_known");
+  });
+
+  it("falls back currentUserId to 'u_unknown' when users array is empty", () => {
+    const s = migrate({ version: 1, users: [] });
+    assert.equal(s.currentUserId, "u_unknown");
+  });
+
+  it("coerces non-numeric retentionPct (string) to undefined", () => {
+    const s = migrate({
+      version: 1,
+      posts: [
+        {
+          id: "po_x",
+          title: "t",
+          platform: "tiktok",
+          content: {
+            hook: "",
+            caption: "",
+            hashtags: [],
+            transcript: "",
+            format: "video",
+            hasTrendingAudio: false,
+          },
+          context: {},
+          threshold: { metric: "views", value: 1, window: "7d" },
+          snapshots: [
+            {
+              id: "s1",
+              atMinutes: 5,
+              impressions: 100,
+              views: 90,
+              likes: 0,
+              comments: 0,
+              shares: 0,
+              saves: 0,
+              retentionPct: "fifty",
+              capturedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        },
+      ],
+    });
+    assert.equal(s.posts[0].snapshots[0].retentionPct, undefined);
+  });
+});
+
+describe("VaultNotFoundError / VaultCorruptError shape", () => {
+  it("VaultNotFoundError carries the path and name", () => {
+    const e = new VaultNotFoundError("/tmp/x");
+    assert.equal(e.name, "VaultNotFoundError");
+    assert.equal(e.path, "/tmp/x");
+  });
+
+  it("VaultCorruptError has the expected name", () => {
+    const e = new VaultCorruptError("bad");
+    assert.equal(e.name, "VaultCorruptError");
+  });
 });

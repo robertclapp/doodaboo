@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isTauri } from "./tauri-storage";
+import { createTauriStorage, isTauri } from "./tauri-storage";
 
 describe("isTauri", () => {
   it("returns false when window is undefined (SSR)", () => {
@@ -58,5 +58,35 @@ describe("isTauri", () => {
     assert.equal(isTauri(), false);
     assert.equal(isTauri(), false);
     assert.equal(isTauri(), false);
+  });
+});
+
+describe("createTauriStorage", () => {
+  it("returns a PersistStorage shape with getItem/setItem/removeItem", () => {
+    const s = createTauriStorage();
+    assert.equal(typeof s.getItem, "function");
+    assert.equal(typeof s.setItem, "function");
+    assert.equal(typeof s.removeItem, "function");
+  });
+
+  it("removeItem is a no-op resolved promise (intentional per file comment)", async () => {
+    const s = createTauriStorage();
+    const r = await s.removeItem("anything");
+    assert.equal(r, undefined);
+  });
+
+  it("getItem returns null when @tauri-apps/api is not available", async () => {
+    // Suppress the expected console.error from the failed dynamic import.
+    const origErr = console.error;
+    console.error = () => {};
+    try {
+      const s = createTauriStorage();
+      const r = await s.getItem("anything");
+      // Outside Tauri, the dynamic import of @tauri-apps/api/core fails,
+      // and getItem returns null per the catch branch.
+      assert.equal(r, null);
+    } finally {
+      console.error = origErr;
+    }
   });
 });

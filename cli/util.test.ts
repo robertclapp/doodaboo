@@ -1,6 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { bounded, fail, nonneg, parseArgs, row, UsageError } from "./util";
+import {
+  bounded,
+  fail,
+  nonneg,
+  parseArgs,
+  row,
+  UsageError,
+  vaultRoot,
+} from "./util";
+import { defaultVaultRoot } from "../src/lib/vault";
 
 describe("nonneg", () => {
   it("accepts a valid finite non-negative number", () => {
@@ -163,5 +172,50 @@ describe("parseArgs — more shapes", () => {
     );
     assert.deepEqual(r.positionals, ["one", "two"]);
     assert.equal(r.values.title, "x");
+  });
+});
+
+describe("vaultRoot", () => {
+  it("returns the --vault value when provided", () => {
+    assert.equal(vaultRoot({ vault: "/tmp/explicit" }), "/tmp/explicit");
+  });
+
+  it("falls back to defaultVaultRoot() when --vault is undefined", () => {
+    assert.equal(vaultRoot({}), defaultVaultRoot());
+  });
+});
+
+describe("nonneg / bounded — boundary cases", () => {
+  it("bounded accepts exact min and exact max", () => {
+    assert.equal(bounded("0", "p", 0, 100), 0);
+    assert.equal(bounded("100", "p", 0, 100), 100);
+  });
+
+  it("bounded rejects min-1 and max+1", () => {
+    assert.throws(() => bounded("-1", "p", 0, 100));
+    assert.throws(() => bounded("101", "p", 0, 100));
+  });
+
+  it("nonneg accepts -0 (since -0 == 0 and is non-negative)", () => {
+    // Node's strict assert.equal uses Object.is which treats -0 ≠ 0.
+    // The contract is just "non-negative finite" — both representations satisfy it.
+    const result = nonneg("-0", "x");
+    assert.ok(result === 0 || Object.is(result, -0));
+  });
+});
+
+describe("row — extra shapes", () => {
+  it("zero-cell call returns empty string", () => {
+    assert.equal(row(), "");
+  });
+
+  it("number 0 renders as '0' (not em-dash)", () => {
+    assert.match(row(0, "tail"), /^0 +tail$/);
+  });
+
+  it("a cell longer than PAD overflows without truncation", () => {
+    const long = "x".repeat(40);
+    const out = row(long, "tail");
+    assert.ok(out.includes(long));
   });
 });

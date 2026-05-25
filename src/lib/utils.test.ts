@@ -211,6 +211,12 @@ describe("utils boundary cases", () => {
     assert.equal(dueStatus(start.toISOString(), Date.now()), "today");
   });
 
+  it("dueStatus: end-of-today (23:59:59.999) is still 'today'", () => {
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    assert.equal(dueStatus(end.toISOString(), Date.now()), "today");
+  });
+
   it("dueStatus: returns 'none' for empty string", () => {
     assert.equal(dueStatus("", Date.now()), "none");
   });
@@ -222,5 +228,18 @@ describe("utils boundary cases", () => {
 
   it("initials: handles all-space input gracefully", () => {
     assert.equal(initials("     "), "");
+  });
+
+  it("localDateInputToIso: day=0 in YYYY-MM-DD returns undefined", () => {
+    assert.equal(localDateInputToIso("2026-05-00"), undefined);
+  });
+
+  it("localDateInputToIso: month=0 in YYYY-MM-DD returns undefined", () => {
+    assert.equal(localDateInputToIso("2026-00-15"), undefined);
+  });
+
+  it("isoToLocalDateInput: Dec 31 round-trips correctly", () => {
+    const iso = new Date(2026, 11, 31).toISOString();
+    assert.equal(isoToLocalDateInput(iso), "2026-12-31");
   });
 });
