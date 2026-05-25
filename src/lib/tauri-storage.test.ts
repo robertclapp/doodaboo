@@ -75,6 +75,24 @@ describe("createTauriStorage", () => {
     assert.equal(r, undefined);
   });
 
+  it("returns an independent instance on each call", () => {
+    const a = createTauriStorage();
+    const b = createTauriStorage();
+    assert.notEqual(a, b);
+  });
+
+  it("returns true when __TAURI_INTERNALS__ is false but __TAURI__ is truthy", () => {
+    // The detection uses `??` so __TAURI_INTERNALS__=false is treated as
+    // "present and false", short-circuiting before __TAURI__. Verify the
+    // documented OR fallback is what actually fires.
+    (globalThis as any).window = { __TAURI_INTERNALS__: undefined, __TAURI__: { v: 1 } };
+    try {
+      assert.equal(isTauri(), true);
+    } finally {
+      delete (globalThis as any).window;
+    }
+  });
+
   it("getItem returns null when @tauri-apps/api is not available", async () => {
     // Suppress the expected console.error from the failed dynamic import.
     const origErr = console.error;

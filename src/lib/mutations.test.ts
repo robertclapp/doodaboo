@@ -752,4 +752,43 @@ describe("setTheme / setCurrentUser", () => {
     const s0 = fresh();
     assert.equal(setCurrentUser(s0, "u_x").currentUserId, "u_x");
   });
+
+  it("setTheme returns a new state object (immutability)", () => {
+    const s0 = fresh();
+    const s1 = setTheme(s0, "dark");
+    assert.notEqual(s1, s0);
+    assert.equal(s0.theme, "system"); // original unchanged
+  });
+});
+
+describe("moveTaskStatus (extended)", () => {
+  it("is a no-op when taskId is unknown (updateTask delegates)", () => {
+    const s0 = fresh();
+    const next = moveTaskStatus(s0, "t_nope", "done");
+    // updateTask returns state unchanged when task is missing.
+    assert.deepEqual(next, s0);
+  });
+
+  it("updates the status to the target value", () => {
+    const s0 = fresh();
+    const task = s0.tasks.find((t) => t.status !== "in_review")!;
+    const next = moveTaskStatus(s0, task.id, "in_review");
+    const updated = next.tasks.find((t) => t.id === task.id)!;
+    assert.equal(updated.status, "in_review");
+  });
+});
+
+describe("createTask sequential numbering", () => {
+  it("sequential creates get consecutive task numbers per project", () => {
+    let s = fresh();
+    const projectId = s.projects[0].id;
+    const before = s.projects.find((p) => p.id === projectId)!.nextTaskNumber;
+    const numbers: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const r = createTask(s, { projectId, title: `seq ${i}` });
+      numbers.push(r.task.number);
+      s = r.state;
+    }
+    assert.deepEqual(numbers, [before, before + 1, before + 2, before + 3, before + 4]);
+  });
 });

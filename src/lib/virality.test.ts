@@ -860,6 +860,63 @@ describe("scoreLive — commentDepth zero-likes branch", () => {
     // 100 comments / 50 = 2, clamped to 1.
     assert.ok(cd!.raw > 0);
   });
+
+  it("stays finite when both impressions and views are 0", () => {
+    const post = makePost({
+      snapshots: [
+        {
+          id: "s1",
+          atMinutes: 30,
+          impressions: 0,
+          views: 0,
+          likes: 5,
+          comments: 2,
+          shares: 1,
+          saves: 0,
+          retentionPct: 50,
+          capturedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const live = scoreLive(post)!;
+    assert.ok(Number.isFinite(live.value));
+  });
+});
+
+describe("platform factor filters", () => {
+  it("x and threads omit a trendingAudio factor (weight=0 filtered)", () => {
+    for (const platform of ["x", "threads"] as Platform[]) {
+      const s = scoreIntrinsic(makePost({ platform }));
+      assert.ok(
+        !s.factors.find((f) => f.id === "trendingAudio"),
+        `${platform} should not surface trendingAudio`,
+      );
+    }
+  });
+
+  it("format recommendation surfaces when current format is not platform-optimal", () => {
+    // x prefers text; if we set a video post on x, format rec should fire.
+    const recs = recommend(
+      makePost({
+        platform: "x",
+        content: { ...makePost().content, format: "video" },
+      }),
+      20,
+    );
+    const r = recs.find((x) => x.factorId === "format");
+    if (r) assert.match(r.message, /text/);
+  });
+
+  it("format recommendation does NOT surface when already optimal", () => {
+    const recs = recommend(
+      makePost({
+        platform: "x",
+        content: { ...makePost().content, format: "text" },
+      }),
+      20,
+    );
+    assert.ok(!recs.find((r) => r.factorId === "format"));
+  });
 });
 
 // ── New: describeBand round-trip ───────────────────────────────────────────

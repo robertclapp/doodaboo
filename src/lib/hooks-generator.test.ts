@@ -142,6 +142,37 @@ describe("HOOK_FAMILIES", () => {
       assert.ok(families.has(f), `family ${f} missing from HOOK_FAMILIES`);
     }
   });
+
+  it("every entry has a non-empty id and label", () => {
+    for (const f of HOOK_FAMILIES) {
+      assert.ok(f.id.length > 0);
+      assert.ok(f.label.length > 0);
+    }
+  });
+
+  it("ids are unique", () => {
+    const ids = new Set(HOOK_FAMILIES.map((f) => f.id));
+    assert.equal(ids.size, HOOK_FAMILIES.length);
+  });
+});
+
+describe("variantsForPlatform subset property", () => {
+  it("any platform's variants are a subset of 'all' variants", () => {
+    const all = generateHooks({ subject: "ai" });
+    const allIds = new Set(all.map((v) => v.id));
+    for (const p of [
+      "tiktok",
+      "x",
+      "linkedin",
+      "instagram_feed",
+      "facebook",
+    ] as const) {
+      const sub = variantsForPlatform(all, p);
+      for (const v of sub) {
+        assert.ok(allIds.has(v.id), `${p}: ${v.id} not in 'all'`);
+      }
+    }
+  });
 });
 
 describe("template content sanity", () => {

@@ -352,6 +352,29 @@ describe("migrate (trust boundary)", () => {
     });
     assert.equal(s.posts[0].snapshots[0].retentionPct, undefined);
   });
+
+  it("backfills post.snapshots when missing entirely", () => {
+    const s = migrate({
+      version: 1,
+      posts: [{ id: "po_x", title: "t", platform: "tiktok" }],
+    });
+    assert.deepEqual(s.posts[0].snapshots, []);
+  });
+
+  it("backfills theme to 'system' when it's not a string", () => {
+    const s = migrate({ version: 1, theme: 42 });
+    assert.equal(s.theme, "system");
+  });
+
+  it("preserves an explicit theme value", () => {
+    const s = migrate({ version: 1, theme: "dark" });
+    assert.equal(s.theme, "dark");
+  });
+
+  it("treats a missing version as 0 and bumps it to WORKSPACE_VERSION", () => {
+    const s = migrate({});
+    assert.equal(s.version, WORKSPACE_VERSION);
+  });
 });
 
 describe("VaultNotFoundError / VaultCorruptError shape", () => {
