@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   initVault,
   loadWorkspace,
+  migrate,
   saveWorkspace,
   vaultExists,
   vaultPaths,
@@ -91,5 +92,237 @@ describe("vault", () => {
     }, root);
     const reloaded = await loadWorkspace(root);
     assert.ok(reloaded.tasks.some((t) => t.id === taskId));
+  });
+
+  it("withWorkspace serialises concurrent mutators", async () => {
+    const root = await tmpVault();
+    await initVault(root, { force: true });
+    const projectId = (await loadWorkspace(root)).projects[0].id;
+
+    // Fire 5 concurrent task creations. Without the lock, two parallel
+    // loads would see the same nextTaskNumber and the second save would
+    // overwrite the first.
+    await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        withWorkspace((s) => {
+          const r = createTask(s, { projectId, title: `parallel ${i}` });
+          return { state: r.state, result: r.task.id };
+        }, root),
+      ),
+    );
+
+    const final = await loadWorkspace(root);
+    const numbers = final.tasks
+      .filter((t) => t.projectId === projectId && /^parallel /.test(t.title))
+      .map((t) => t.number);
+    assert.equal(numbers.length, 5);
+    assert.equal(new Set(numbers).size, 5, "task numbers must be unique");
+  });
+});
+
+// ── Additional vault tests ─────────────────────────────────────────────────
+
+describe("vaultExists", () => {
+  it("returns false for a directory without workspace.json", async () => {
+    const root = await tmpVault();
+    assert.equal(await vaultExists(root), false);
+  });
+
+  it("returns true after initVault", async () => {
+    const root = await tmpVault();
+    await initVault(root, { force: true });
+    assert.equal(await vaultExists(root), true);
+  });
+});
+
+describe("vaultPaths", () => {
+  it("returns correct sub-paths for a given root", () => {
+    const root = "/tmp/test-vault";
+    const paths = vaultPaths(root);
+    assert.ok(paths.workspaceFile.includes("workspace.json"));
+    assert.ok(paths.backupsDir.includes("backups"));
+    assert.ok(paths.pluginsDir.includes("plugins"));
+    assert.ok(paths.exportsDir.includes("exports"));
+    assert.equal(paths.root, path.resolve(root));
+  });
+});
+
+describe("initVault", () => {
+  it("throws (not force) when vault already exists", async () => {
+    const root = await tmpVault();
+    await initVault(root, { force: true });
+    await assert.rejects(
+      initVault(root),
+      /already exists/,
+    );
+  });
+
+  it("force-init overwrites existing vault without throwing", async () => {
+    const root = await tmpVault();
+    await initVault(root, { force: true });
+    // Second init with force should succeed
+    const paths = await initVault(root, { force: true });
+    assert.ok(paths.workspaceFile.endsWith("workspace.json"));
+  });
+
+  it("all four subdirs exist after init", async () => {
+    const root = await tmpVault();
+    const paths = await initVault(root, { force: true });
+    for (const dir of [paths.backupsDir, paths.pluginsDir, paths.exportsDir]) {
+      const stat = await fs.stat(dir);
+      assert.ok(stat.isDirectory(), `${dir} is not a directory`);
+    }
+  });
+});
+
+describe("VaultNotFoundError / VaultCorruptError", () => {
+  it("VaultNotFoundError has name 'VaultNotFoundError'", () => {
+    const e = new VaultNotFoundError("test");
+    assert.equal(e.name, "VaultNotFoundError");
+    assert.ok(e instanceof Error);
+  });
+
+  it("VaultCorruptError has name 'VaultCorruptError'", () => {
+    const e = new VaultCorruptError("test");
+    assert.equal(e.name, "VaultCorruptError");
+    assert.ok(e instanceof Error);
+  });
+});
+
+describe("migrate (trust boundary)", () => {
+  it("throws VaultCorruptError when input is not an object", () => {
+    assert.throws(() => migrate("not an object"), VaultCorruptError);
+    assert.throws(() => migrate(null), VaultCorruptError);
+    assert.throws(() => migrate(42 as unknown), VaultCorruptError);
+  });
+
+  it("rejects a future-version payload", () => {
+    assert.throws(
+      () => migrate({ version: WORKSPACE_VERSION + 1 }),
+      /newer than this build supports/,
+    );
+  });
+
+  it("backfills missing top-level arrays", () => {
+    const s = migrate({ version: 1 });
+    assert.deepEqual(s.users, []);
+    assert.deepEqual(s.labels, []);
+    assert.deepEqual(s.projects, []);
+    assert.deepEqual(s.tasks, []);
+    assert.deepEqual(s.posts, []);
+  });
+
+  it("backfills missing nested arrays on tasks", () => {
+    const s = migrate({
+      version: 1,
+      tasks: [{ id: "t_x", projectId: "p_x", number: 1, title: "t" }],
+    });
+    assert.deepEqual(s.tasks[0].labelIds, []);
+    assert.deepEqual(s.tasks[0].comments, []);
+    assert.deepEqual(s.tasks[0].activity, []);
+  });
+
+  it("recomputes nextTaskNumber from existing task numbers when missing", () => {
+    const s = migrate({
+      version: 1,
+      projects: [{ id: "p_x", key: "X", name: "X" }],
+      tasks: [
+        { id: "t1", projectId: "p_x", number: 5, title: "x" },
+        { id: "t2", projectId: "p_x", number: 3, title: "y" },
+      ],
+    });
+    assert.equal(s.projects[0].nextTaskNumber, 6);
+  });
+
+  it("backfills missing post content + hashtags", () => {
+    const s = migrate({
+      version: 1,
+      posts: [{ id: "po_x", title: "t", platform: "tiktok" }],
+    });
+    assert.equal(s.posts[0].content.hook, "");
+    assert.deepEqual(s.posts[0].content.hashtags, []);
+    assert.deepEqual(s.posts[0].snapshots, []);
+  });
+
+  it("coerces NaN/Infinity/negative snapshot fields to 0", () => {
+    const s = migrate({
+      version: 1,
+      posts: [
+        {
+          id: "po_x",
+          title: "t",
+          platform: "tiktok",
+          content: { hook: "", caption: "", hashtags: [], transcript: "", format: "video", hasTrendingAudio: false },
+          context: {},
+          threshold: { metric: "views", value: 1, window: "7d" },
+          snapshots: [
+            {
+              id: "s1",
+              atMinutes: -5,
+              impressions: NaN,
+              views: Infinity,
+              likes: -3,
+              comments: 0,
+              shares: 0,
+              saves: 0,
+              capturedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        },
+      ],
+    });
+    const snap = s.posts[0].snapshots[0];
+    assert.equal(snap.atMinutes, 0);
+    assert.equal(snap.impressions, 0);
+    assert.equal(snap.views, 0);
+    assert.equal(snap.likes, 0);
+  });
+
+  it("drops out-of-range retentionPct / negative watchTimeAvgSec", () => {
+    const s = migrate({
+      version: 1,
+      posts: [
+        {
+          id: "po_x",
+          title: "t",
+          platform: "tiktok",
+          content: { hook: "", caption: "", hashtags: [], transcript: "", format: "video", hasTrendingAudio: false },
+          context: {},
+          threshold: { metric: "views", value: 1, window: "7d" },
+          snapshots: [
+            {
+              id: "s1",
+              atMinutes: 5,
+              impressions: 100,
+              views: 90,
+              likes: 0,
+              comments: 0,
+              shares: 0,
+              saves: 0,
+              retentionPct: 150,
+              watchTimeAvgSec: -1,
+              capturedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        },
+      ],
+    });
+    const snap = s.posts[0].snapshots[0];
+    assert.equal(snap.retentionPct, undefined);
+    assert.equal(snap.watchTimeAvgSec, undefined);
+  });
+
+  it("defaults theme to 'system' and falls back currentUserId to first user", () => {
+    const s = migrate({
+      version: 1,
+      users: [{ id: "u_only", name: "only", handle: "only", color: "#000" }],
+    });
+    assert.equal(s.theme, "system");
+    assert.equal(s.currentUserId, "u_only");
+  });
+
+  it("bumps version to current WORKSPACE_VERSION", () => {
+    const s = migrate({ version: 0 });
+    assert.equal(s.version, WORKSPACE_VERSION);
   });
 });
