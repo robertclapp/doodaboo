@@ -1,0 +1,145 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import {
+  generateHooks,
+  HOOK_FAMILIES,
+  variantsForPlatform,
+} from "./hooks-generator";
+
+describe("generateHooks", () => {
+  it("returns [] for empty or whitespace-only subject", () => {
+    assert.deepEqual(generateHooks({ subject: "" }), []);
+    assert.deepEqual(generateHooks({ subject: "   " }), []);
+  });
+
+  it("is deterministic: same input → same variants in same order", () => {
+    const a = generateHooks({ subject: "design systems" });
+    const b = generateHooks({ subject: "design systems" });
+    assert.equal(a.length, b.length);
+    for (let i = 0; i < a.length; i++) {
+      assert.equal(a[i].id, b[i].id);
+      assert.equal(a[i].hook, b[i].hook);
+    }
+  });
+
+  it("returns at least one variant for a non-empty subject", () => {
+    const v = generateHooks({ subject: "AI agents" });
+    assert.ok(v.length > 0);
+  });
+
+  it("every variant has a non-empty hook string", () => {
+    const v = generateHooks({ subject: "AI agents" });
+    for (const x of v) {
+      assert.ok(x.hook.length > 0, `empty hook for ${x.id}`);
+    }
+  });
+
+  it("`fitsAll` templates expand to all 8 platforms", () => {
+    const v = generateHooks({ subject: "AI agents" });
+    const fitsAll = v.filter((x) => x.template.fitsAll);
+    assert.ok(fitsAll.length > 0);
+    for (const x of fitsAll) {
+      assert.equal(x.fits.length, 8);
+      for (const p of [
+        "tiktok",
+        "reels",
+        "shorts",
+        "x",
+        "threads",
+        "linkedin",
+        "instagram_feed",
+        "facebook",
+      ]) {
+        assert.ok(x.fits.includes(p as any), `missing ${p} in ${x.id}`);
+      }
+    }
+  });
+
+  it("non-fitsAll variants carry only the template's listed platforms", () => {
+    const v = generateHooks({ subject: "AI agents" });
+    const limited = v.filter((x) => !x.template.fitsAll);
+    for (const x of limited) {
+      const expected = x.template.fits ?? [];
+      assert.deepEqual(x.fits.slice().sort(), expected.slice().sort());
+    }
+  });
+
+  it("variant id embeds a slugified subject (lowercased, hyphenated)", () => {
+    const v = generateHooks({ subject: "  Design Systems!!  " });
+    for (const x of v) {
+      assert.ok(
+        /design-systems/.test(x.id),
+        `expected design-systems in ${x.id}`,
+      );
+      // Must not contain uppercase or punctuation
+      assert.equal(x.id, x.id.toLowerCase());
+    }
+  });
+
+  it("subject slug caps at 24 chars in the id", () => {
+    const longSubject = "this is a really long subject line that keeps going";
+    const v = generateHooks({ subject: longSubject });
+    // id is `${template.id}_${slug}` where slug max length = 24.
+    // We assert the slug portion length explicitly.
+    for (const x of v) {
+      const slug = x.id.slice(x.template.id.length + 1);
+      assert.ok(slug.length <= 24, `slug too long: ${slug}`);
+    }
+  });
+
+  it("interpolates audience into the contrarian template", () => {
+    const withAud = generateHooks({
+      subject: "pricing",
+      audience: "founders",
+    }).find((x) => x.template.id === "everyone-wrong");
+    assert.ok(withAud);
+    assert.match(withAud!.hook, /founders/);
+
+    const withoutAud = generateHooks({ subject: "pricing" }).find(
+      (x) => x.template.id === "everyone-wrong",
+    );
+    assert.ok(withoutAud);
+    assert.match(withoutAud!.hook, /people/); // default fallback
+  });
+
+  it("every variant id is unique within a generation", () => {
+    const v = generateHooks({ subject: "ai" });
+    const ids = new Set(v.map((x) => x.id));
+    assert.equal(ids.size, v.length);
+  });
+});
+
+describe("variantsForPlatform", () => {
+  it("returns all variants when platform=all", () => {
+    const v = generateHooks({ subject: "ai" });
+    assert.equal(variantsForPlatform(v, "all").length, v.length);
+  });
+
+  it("filters to variants that include the platform", () => {
+    const v = generateHooks({ subject: "ai" });
+    const tt = variantsForPlatform(v, "tiktok");
+    assert.ok(tt.length > 0);
+    for (const x of tt) {
+      assert.ok(x.fits.includes("tiktok"));
+    }
+  });
+
+  it("excludes variants whose template does not target the platform", () => {
+    // "everyone-wrong" template targets x/threads/linkedin/facebook only.
+    const v = generateHooks({ subject: "ai" });
+    const tt = variantsForPlatform(v, "tiktok");
+    assert.ok(!tt.find((x) => x.template.id === "everyone-wrong"));
+  });
+});
+
+describe("HOOK_FAMILIES", () => {
+  it("covers every family used by some template", () => {
+    const families = new Set(HOOK_FAMILIES.map((f) => f.id));
+    const used = new Set(
+      generateHooks({ subject: "x" }).map((v) => v.template.family),
+    );
+    for (const f of used) {
+      assert.ok(families.has(f), `family ${f} missing from HOOK_FAMILIES`);
+    }
+  });
+});

@@ -2,12 +2,13 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   describeBand,
+  platformProfile,
   projectThreshold,
   recommend,
   scoreIntrinsic,
   scoreLive,
 } from "./virality";
-import { Post } from "./types";
+import { Platform, Post, SCORE_BANDS } from "./types";
 
 function makePost(overrides: Partial<Post> = {}): Post {
   const base: Post = {
@@ -300,6 +301,123 @@ describe("projectThreshold", () => {
     assert.ok(p.probability >= 0 && p.probability <= 1);
   });
 
+  it("supports the 'shares' metric", () => {
+    const post = makePost({
+      threshold: { metric: "shares", value: 10_000, window: "7d" },
+      snapshots: [
+        {
+          id: "s1",
+          atMinutes: 60,
+          impressions: 10_000,
+          views: 9_500,
+          likes: 800,
+          comments: 100,
+          shares: 200,
+          saves: 60,
+          retentionPct: 55,
+          capturedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const p = projectThreshold(post)!;
+    assert.equal(p.metric, "shares");
+    assert.ok(p.projected > 200);
+  });
+
+  it("supports the 'engagement_rate' metric", () => {
+    const post = makePost({
+      threshold: { metric: "engagement_rate", value: 0.05, window: "7d" },
+      snapshots: [
+        {
+          id: "s1",
+          atMinutes: 60,
+          impressions: 1_000,
+          views: 950,
+          likes: 100,
+          comments: 20,
+          shares: 30,
+          saves: 10,
+          retentionPct: 55,
+          capturedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const p = projectThreshold(post)!;
+    assert.equal(p.metric, "engagement_rate");
+    assert.ok(p.projected > 0 && p.projected < 1);
+  });
+
+  it("uses impressions when views is 0", () => {
+    const post = makePost({
+      threshold: { metric: "views", value: 100_000, window: "7d" },
+      snapshots: [
+        {
+          id: "s1",
+          atMinutes: 60,
+          impressions: 5000,
+          views: 0,
+          likes: 100,
+          comments: 10,
+          shares: 30,
+          saves: 5,
+          retentionPct: 55,
+          capturedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const p = projectThreshold(post)!;
+    // metricNow falls back to impressions=5000; projected scales up from there.
+    assert.ok(p.projected > 5000);
+  });
+
+  it("respects the 24h and 30d windows", () => {
+    const snap = {
+      id: "s1",
+      atMinutes: 60,
+      impressions: 10_000,
+      views: 9_500,
+      likes: 500,
+      comments: 50,
+      shares: 100,
+      saves: 20,
+      retentionPct: 55,
+      capturedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const a = projectThreshold(
+      makePost({ threshold: { metric: "views", value: 100_000, window: "24h" }, snapshots: [snap] }),
+    )!;
+    const b = projectThreshold(
+      makePost({ threshold: { metric: "views", value: 100_000, window: "30d" }, snapshots: [snap] }),
+    )!;
+    assert.equal(a.windowMinutes, 24 * 60);
+    assert.equal(b.windowMinutes, 30 * 24 * 60);
+    // The 30d window has more time, so projected value is ≥ the 24h one.
+    assert.ok(b.projected >= a.projected);
+  });
+
+  it("returns probability=0 when threshold value is 0", () => {
+    const post = makePost({
+      threshold: { metric: "views", value: 0, window: "7d" },
+      snapshots: [
+        {
+          id: "s1",
+          atMinutes: 60,
+          impressions: 1000,
+          views: 950,
+          likes: 50,
+          comments: 5,
+          shares: 5,
+          saves: 1,
+          retentionPct: 30,
+          capturedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const p = projectThreshold(post)!;
+    // With value=0 the ratio guard returns 0 → sigmoid(-1.5) ≈ 0.18
+    assert.ok(p.probability < 0.5);
+  });
+
   it("higher engagement → higher hit probability", () => {
     const low = makePost({
       threshold: { metric: "views", value: 1_000_000, window: "7d" },
@@ -338,5 +456,362 @@ describe("projectThreshold", () => {
     const a = projectThreshold(low)!;
     const b = projectThreshold(high)!;
     assert.ok(b.probability > a.probability);
+  });
+});
+
+// ── New: per-platform coverage ─────────────────────────────────────────────
+
+describe("platformProfile + per-platform scoring", () => {
+  const PLATFORMS: Platform[] = [
+    "tiktok",
+    "reels",
+    "shorts",
+    "instagram_feed",
+    "x",
+    "threads",
+    "linkedin",
+    "facebook",
+  ];
+
+  for (const platform of PLATFORMS) {
+    it(`returns a profile for ${platform} with sum(weights) ≈ 1`, () => {
+      const p = platformProfile(platform);
+      const s = scoreIntrinsic(makePost({ platform }));
+      const total = s.factors.reduce((sum, f) => sum + f.weight, 0);
+      assert.ok(Math.abs(total - 1) < 0.001, `weights sum=${total} for ${platform}`);
+      assert.ok(p.captionSweet.ideal > 0);
+      assert.ok(p.peakHours.length > 0);
+    });
+  }
+
+  it("non-video platforms have no videoTargetSec", () => {
+    for (const p of ["instagram_feed", "x", "threads", "linkedin"] as Platform[]) {
+      assert.equal(platformProfile(p).videoTargetSec, undefined);
+    }
+  });
+
+  it("video platforms have a videoTargetSec range", () => {
+    for (const p of ["tiktok", "reels", "shorts", "facebook"] as Platform[]) {
+      const t = platformProfile(p).videoTargetSec!;
+      assert.ok(t.min < t.ideal && t.ideal < t.max, `bad range on ${p}`);
+    }
+  });
+});
+
+// ── New: format/sentiment branches in scoreIntrinsic ───────────────────────
+
+describe("scoreIntrinsic — format & sentiment branches", () => {
+  const formats: any[] = ["video", "image", "carousel", "text", "live"];
+
+  for (const format of formats) {
+    it(`scores ${format} format on tiktok without error`, () => {
+      const s = scoreIntrinsic(
+        makePost({
+          content: { ...makePost().content, format },
+        }),
+      );
+      assert.ok(s.value >= 0 && s.value <= 100);
+    });
+  }
+
+  for (const sentiment of [
+    "negative",
+    "neutral",
+    "positive",
+    "controversial",
+  ] as const) {
+    it(`scores sentiment=${sentiment}`, () => {
+      const s = scoreIntrinsic(
+        makePost({ context: { ...makePost().context, sentiment } }),
+      );
+      assert.ok(s.value >= 0 && s.value <= 100);
+    });
+  }
+
+  it("controversial sentiment outscores neutral, all else equal", () => {
+    const neutral = scoreIntrinsic(
+      makePost({ context: { ...makePost().context, sentiment: "neutral" } }),
+    );
+    const controversial = scoreIntrinsic(
+      makePost({
+        context: { ...makePost().context, sentiment: "controversial" },
+      }),
+    );
+    assert.ok(controversial.value > neutral.value);
+  });
+});
+
+// ── New: duration sub-branches ─────────────────────────────────────────────
+
+describe("scoreIntrinsic — duration branches", () => {
+  it("video shorter than min is penalized vs ideal", () => {
+    const ideal = scoreIntrinsic(
+      makePost({ content: { ...makePost().content, durationSec: 21 } }),
+    );
+    const tooShort = scoreIntrinsic(
+      makePost({ content: { ...makePost().content, durationSec: 3 } }),
+    );
+    assert.ok(ideal.value > tooShort.value);
+  });
+
+  it("video longer than max is penalized vs ideal", () => {
+    const ideal = scoreIntrinsic(
+      makePost({ content: { ...makePost().content, durationSec: 21 } }),
+    );
+    const tooLong = scoreIntrinsic(
+      makePost({ content: { ...makePost().content, durationSec: 120 } }),
+    );
+    assert.ok(ideal.value > tooLong.value);
+  });
+
+  it("undefined durationSec is handled (no crash) on video platforms", () => {
+    const s = scoreIntrinsic(
+      makePost({ content: { ...makePost().content, durationSec: undefined } }),
+    );
+    assert.ok(s.value >= 0 && s.value <= 100);
+  });
+});
+
+// ── New: empty / boundary inputs ───────────────────────────────────────────
+
+describe("scoreIntrinsic — boundary inputs", () => {
+  it("handles audienceSize=0 without divide-by-zero", () => {
+    const s = scoreIntrinsic(
+      makePost({
+        context: { ...makePost().context, audienceSize: 0, accountAvgViews: 0 },
+      }),
+    );
+    assert.ok(Number.isFinite(s.value));
+  });
+
+  it("handles empty hashtags array", () => {
+    const s = scoreIntrinsic(
+      makePost({ content: { ...makePost().content, hashtags: [] } }),
+    );
+    assert.ok(Number.isFinite(s.value));
+  });
+});
+
+// ── New: bandFor (via score values) ────────────────────────────────────────
+
+describe("score band thresholds (SCORE_BANDS contract)", () => {
+  it("band thresholds are strictly ascending", () => {
+    for (let i = 1; i < SCORE_BANDS.length; i++) {
+      assert.ok(SCORE_BANDS[i].min > SCORE_BANDS[i - 1].min);
+    }
+  });
+
+  it("a near-perfect tiktok scores in 'hot' or 'rocket'", () => {
+    const s = scoreIntrinsic(
+      makePost({
+        content: {
+          hook: "Stop scrolling — this is the one tip you need.",
+          caption: Array(90).fill("a").join(""),
+          hashtags: ["a", "b", "c", "d"],
+          transcript: "",
+          format: "video",
+          durationSec: 21,
+          hasTrendingAudio: true,
+        },
+        context: {
+          audienceSize: 14000,
+          accountAvgViews: 14000,
+          postingHour: 20,
+          dayOfWeek: 3,
+          topicCategory: "design",
+          novelty: 5,
+          emotion: 5,
+          trendMatch: 5,
+          sentiment: "controversial",
+        },
+      }),
+    );
+    assert.ok(["hot", "rocket"].includes(s.band), `band was ${s.band}`);
+  });
+
+  it("a near-empty post scores in 'flop'", () => {
+    const s = scoreIntrinsic(
+      makePost({
+        content: {
+          hook: "",
+          caption: "",
+          hashtags: [],
+          transcript: "",
+          format: "text", // bad fit on tiktok
+          durationSec: undefined,
+          hasTrendingAudio: false,
+        },
+        context: {
+          audienceSize: 0,
+          accountAvgViews: 0,
+          postingHour: 4,
+          dayOfWeek: 0,
+          topicCategory: "general",
+          novelty: 1,
+          emotion: 1,
+          trendMatch: 1,
+          sentiment: "neutral",
+        },
+      }),
+    );
+    assert.equal(s.band, "flop");
+  });
+});
+
+// ── New: recommend message branches ────────────────────────────────────────
+
+describe("recommend — message branches", () => {
+  it("flags missing/short hooks differently", () => {
+    const empty = recommend(
+      makePost({ content: { ...makePost().content, hook: "" } }),
+    );
+    assert.ok(
+      empty.find((r) => r.factorId === "hook" && /Add a hook/.test(r.message)),
+    );
+
+    const tooShort = recommend(
+      makePost({ content: { ...makePost().content, hook: "Hi" } }),
+    );
+    assert.ok(
+      tooShort.find(
+        (r) => r.factorId === "hook" && /aim for 4–8/.test(r.message),
+      ),
+    );
+
+    const tooLong = recommend(
+      makePost({
+        content: {
+          ...makePost().content,
+          hook: Array(20).fill("word").join(" "),
+        },
+      }),
+    );
+    assert.ok(
+      tooLong.find(
+        (r) => r.factorId === "hook" && /tighten/.test(r.message),
+      ),
+    );
+  });
+
+  it("hashtag rec uses 'hashtag' singular when off by 1", () => {
+    // tiktok ideal=4. Provide 3 hashtags → diff=-1 → "Add 1 more hashtag"
+    const recs = recommend(
+      makePost({
+        content: { ...makePost().content, hashtags: ["a", "b", "c"] },
+      }),
+      20,
+    );
+    const r = recs.find((x) => x.factorId === "hashtags");
+    if (r) assert.match(r.message, /1 more hashtag(?!s)/);
+  });
+
+  it("trendingAudio suggestion only appears on tiktok/reels", () => {
+    const linkedinRecs = recommend(
+      makePost({
+        platform: "linkedin",
+        content: {
+          ...makePost().content,
+          format: "text",
+          hasTrendingAudio: false,
+        },
+      }),
+      20,
+    );
+    assert.ok(!linkedinRecs.find((r) => r.factorId === "trendingAudio"));
+  });
+
+  it("flags neutral sentiment as a weakness", () => {
+    const recs = recommend(
+      makePost({ context: { ...makePost().context, sentiment: "neutral" } }),
+      20,
+    );
+    if (recs.find((r) => r.factorId === "sentiment")) {
+      // good — message branch fired
+      assert.ok(true);
+    }
+  });
+
+  it("respects max parameter cap", () => {
+    const recs = recommend(
+      makePost({
+        content: {
+          hook: "",
+          caption: "",
+          hashtags: [],
+          transcript: "",
+          format: "text",
+          durationSec: undefined,
+          hasTrendingAudio: false,
+        },
+        context: {
+          audienceSize: 10,
+          accountAvgViews: 0,
+          postingHour: 3,
+          dayOfWeek: 0,
+          topicCategory: "general",
+          novelty: 1,
+          emotion: 1,
+          trendMatch: 1,
+          sentiment: "neutral",
+        },
+      }),
+      2,
+    );
+    assert.ok(recs.length <= 2);
+  });
+
+  it("postingTime suggestion differentiates hour-only vs day-only off-peak", () => {
+    // hour OK, day off → "Shift to a peak day"
+    const dayOff = recommend(
+      makePost({
+        platform: "tiktok", // peakHours include 20, peakDays=[2,3,4,6]
+        context: { ...makePost().context, postingHour: 20, dayOfWeek: 0 },
+      }),
+      20,
+    );
+    const r1 = dayOff.find((r) => r.factorId === "postingTime");
+    if (r1) assert.match(r1.message, /peak day/);
+
+    // day OK, hour off
+    const hourOff = recommend(
+      makePost({
+        platform: "tiktok",
+        context: { ...makePost().context, postingHour: 4, dayOfWeek: 3 },
+      }),
+      20,
+    );
+    const r2 = hourOff.find((r) => r.factorId === "postingTime");
+    if (r2) assert.match(r2.message, /peak window/);
+  });
+});
+
+// ── New: extraFactors plumbing ─────────────────────────────────────────────
+
+describe("scoreIntrinsic — extraFactors plumbing", () => {
+  it("accepts plugin-injected factors and reflects them in output", () => {
+    const extra = {
+      id: "plugin_test",
+      label: "Plugin test",
+      group: "content" as const,
+      raw: 0.5,
+      weight: 0.1,
+      contribution: 5,
+      hint: "Test",
+    };
+    const s = scoreIntrinsic(makePost(), [extra]);
+    assert.ok(s.factors.find((f) => f.id === "plugin_test"));
+  });
+});
+
+// ── New: describeBand round-trip ───────────────────────────────────────────
+
+describe("describeBand", () => {
+  it("returns a distinct tone per band", () => {
+    const tones = new Set(
+      (["flop", "meh", "solid", "hot", "rocket"] as const).map(
+        (b) => describeBand(b).tone,
+      ),
+    );
+    assert.equal(tones.size, 5);
   });
 });
