@@ -143,3 +143,40 @@ describe("HOOK_FAMILIES", () => {
     }
   });
 });
+
+describe("template content sanity", () => {
+  it("'stop-x' embeds the subject after 'Stop'", () => {
+    const v = generateHooks({ subject: "doing X" }).find(
+      (x) => x.template.id === "stop-x",
+    );
+    assert.ok(v);
+    assert.match(v!.hook, /^Stop doing X\./);
+  });
+
+  it("'tried-for-x-days' mentions '30 days'", () => {
+    const v = generateHooks({ subject: "ai agents" }).find(
+      (x) => x.template.id === "tried-for-x-days",
+    );
+    assert.ok(v);
+    assert.match(v!.hook, /30 days/);
+  });
+
+  it("'no-one-tells' uses the 'What nobody tells you about' framing", () => {
+    const v = generateHooks({ subject: "ai agents" }).find(
+      (x) => x.template.id === "no-one-tells",
+    );
+    assert.ok(v);
+    assert.match(v!.hook, /What nobody tells you about ai agents/);
+  });
+
+  it("'in-x-seconds' (TikTok-native) only fits short-form video platforms", () => {
+    const v = generateHooks({ subject: "ai" }).find(
+      (x) => x.template.id === "in-x-seconds",
+    );
+    assert.ok(v);
+    assert.deepEqual(
+      v!.fits.slice().sort(),
+      ["reels", "shorts", "tiktok"].sort(),
+    );
+  });
+});

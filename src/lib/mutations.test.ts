@@ -432,6 +432,19 @@ describe("updateTask (extended)", () => {
     const entry = updated.activity[updated.activity.length - 1];
     assert.equal(entry.authorId, "u_actor");
   });
+
+  it("uses '@handle' format when assigning to a known user", () => {
+    const s0 = fresh();
+    const task = s0.tasks[0];
+    const otherUser = s0.users.find((u) => u.id !== task.assigneeId)!;
+    const next = updateTask(s0, task.id, { assigneeId: otherUser.id });
+    const updated = next.tasks.find((t) => t.id === task.id)!;
+    assert.ok(
+      updated.activity.some((a) =>
+        a.message.includes(`Assigned to @${otherUser.handle}`),
+      ),
+    );
+  });
 });
 
 // ── New: deleteTask ────────────────────────────────────────────────────────
@@ -518,6 +531,13 @@ describe("duplicatePost (extended)", () => {
     const original = s0.posts[0];
     const r = duplicatePost(s0, original.id, { titleSuffix: "" });
     assert.equal(r.post!.title, original.title);
+  });
+
+  it("default titleSuffix is ' (variant)'", () => {
+    const s0 = fresh();
+    const original = s0.posts[0];
+    const r = duplicatePost(s0, original.id);
+    assert.equal(r.post!.title, `${original.title} (variant)`);
   });
 });
 

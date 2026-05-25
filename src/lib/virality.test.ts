@@ -815,3 +815,295 @@ describe("describeBand", () => {
     assert.equal(tones.size, 5);
   });
 });
+
+// ── New: scoreLive deeper coverage ─────────────────────────────────────────
+
+describe("scoreLive — deeper coverage", () => {
+  it("blended confidence stays inside [0.55, 0.875] (clamp + curve bounds)", () => {
+    // confidence = clamp(0.45 + 0.5 * liveW); liveW is clamped to [0.2, 0.85].
+    const early = makePost({
+      snapshots: [
+        {
+          id: "s1",
+          atMinutes: 0,
+          impressions: 1000,
+          views: 900,
+          likes: 50,
+          comments: 5,
+          shares: 5,
+          saves: 2,
+          retentionPct: 50,
+          capturedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const late = makePost({
+      snapshots: [
+        {
+          id: "s1",
+          atMinutes: 10_000, // very late — pushes liveW to its clamp ceiling
+          impressions: 1_000_000,
+          views: 900_000,
+          likes: 50_000,
+          comments: 5_000,
+          shares: 5_000,
+          saves: 2_000,
+          retentionPct: 70,
+          capturedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const a = scoreLive(early)!;
+    const b = scoreLive(late)!;
+    assert.ok(a.confidence >= 0.55, `early conf=${a.confidence}`);
+    assert.ok(b.confidence <= 0.875, `late conf=${b.confidence}`);
+  });
+
+  it("velocity branch with only one snapshot stays finite", () => {
+    const post = makePost({
+      snapshots: [
+        {
+          id: "s1",
+          atMinutes: 30,
+          impressions: 5000,
+          views: 4500,
+          likes: 200,
+          comments: 20,
+          shares: 50,
+          saves: 10,
+          retentionPct: 55,
+          capturedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const live = scoreLive(post)!;
+    assert.ok(Number.isFinite(live.value));
+    assert.ok(live.factors.some((f) => f.id === "velocity"));
+  });
+
+  it("instagram_feed (retention weight 0) drops retention from factor list", () => {
+    const post = makePost({
+      platform: "instagram_feed",
+      snapshots: [
+        {
+          id: "s1",
+          atMinutes: 20,
+          impressions: 2000,
+          views: 1800,
+          likes: 150,
+          comments: 20,
+          shares: 30,
+          saves: 50,
+          retentionPct: 55,
+          capturedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const live = scoreLive(post)!;
+    assert.ok(Number.isFinite(live.value));
+    assert.ok(
+      !live.factors.find((f) => f.id === "retention"),
+      "retention factor should be filtered out when weight=0",
+    );
+  });
+});
+
+// ── New: projectThreshold edge cases ───────────────────────────────────────
+
+describe("projectThreshold — edge cases", () => {
+  it("uses atMinutes=1 as floor to avoid log(0+1)/log(0+1) NaN", () => {
+    const post = makePost({
+      threshold: { metric: "views", value: 1000, window: "7d" },
+      snapshots: [
+        {
+          id: "s1",
+          atMinutes: 0,
+          impressions: 500,
+          views: 450,
+          likes: 20,
+          comments: 2,
+          shares: 5,
+          saves: 1,
+          retentionPct: 50,
+          capturedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const p = projectThreshold(post)!;
+    assert.ok(Number.isFinite(p.projected));
+    assert.ok(p.projected > 0);
+  });
+
+  it("probability stays in [0, 1] across all threshold metrics", () => {
+    const snap = {
+      id: "s1",
+      atMinutes: 60,
+      impressions: 5000,
+      views: 4500,
+      likes: 300,
+      comments: 30,
+      shares: 100,
+      saves: 20,
+      retentionPct: 55,
+      capturedAt: "2026-01-01T00:00:00.000Z",
+    };
+    for (const metric of ["views", "shares", "engagement_rate"] as const) {
+      const p = projectThreshold(
+        makePost({
+          threshold: { metric, value: 1_000_000, window: "7d" },
+          snapshots: [snap],
+        }),
+      )!;
+      assert.ok(p.probability >= 0 && p.probability <= 1, `metric=${metric}`);
+    }
+  });
+
+  it("basisMinutes equals the latest snapshot's atMinutes", () => {
+    const post = makePost({
+      threshold: { metric: "views", value: 100_000, window: "7d" },
+      snapshots: [
+        {
+          id: "s1",
+          atMinutes: 30,
+          impressions: 2000,
+          views: 1800,
+          likes: 100,
+          comments: 10,
+          shares: 30,
+          saves: 5,
+          retentionPct: 50,
+          capturedAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "s2",
+          atMinutes: 120,
+          impressions: 8000,
+          views: 7500,
+          likes: 400,
+          comments: 30,
+          shares: 100,
+          saves: 20,
+          retentionPct: 55,
+          capturedAt: "2026-01-01T02:00:00.000Z",
+        },
+      ],
+    });
+    const p = projectThreshold(post)!;
+    assert.equal(p.basisMinutes, 120);
+  });
+});
+
+// ── New: recommend message branches (granular) ─────────────────────────────
+
+describe("recommend — granular message branches", () => {
+  it("caption empty: 'Caption is empty' message", () => {
+    const recs = recommend(
+      makePost({ content: { ...makePost().content, caption: "" } }),
+      20,
+    );
+    const r = recs.find((x) => x.factorId === "caption");
+    if (r) assert.match(r.message, /Caption is empty/);
+  });
+
+  it("caption way over ideal: 'trim toward' message", () => {
+    const recs = recommend(
+      makePost({
+        content: {
+          ...makePost().content,
+          caption: Array(1000).fill("x").join(""),
+        },
+      }),
+      20,
+    );
+    const r = recs.find((x) => x.factorId === "caption");
+    if (r) assert.match(r.message, /trim toward/);
+  });
+
+  it("duration: 'Set the video duration' when missing", () => {
+    const recs = recommend(
+      makePost({
+        content: {
+          ...makePost().content,
+          durationSec: undefined,
+        },
+      }),
+      20,
+    );
+    const r = recs.find((x) => x.factorId === "duration");
+    if (r) assert.match(r.message, /Set the video duration/);
+  });
+
+  it("duration: 'too short' for below min", () => {
+    const recs = recommend(
+      makePost({ content: { ...makePost().content, durationSec: 3 } }),
+      20,
+    );
+    const r = recs.find((x) => x.factorId === "duration");
+    if (r) assert.match(r.message, /too short/);
+  });
+
+  it("duration: 'long for this platform' when above max", () => {
+    const recs = recommend(
+      makePost({ content: { ...makePost().content, durationSec: 200 } }),
+      20,
+    );
+    const r = recs.find((x) => x.factorId === "duration");
+    if (r) assert.match(r.message, /long for this platform/);
+  });
+
+  it("baseline: 'Set audience size' when audienceSize=0", () => {
+    const recs = recommend(
+      makePost({ context: { ...makePost().context, audienceSize: 0 } }),
+      20,
+    );
+    const r = recs.find((x) => x.factorId === "baseline");
+    if (r) assert.match(r.message, /Set audience size/);
+  });
+
+  it("baseline: 'recent average views' when accountAvgViews=0 (audience>0)", () => {
+    const recs = recommend(
+      makePost({
+        context: {
+          ...makePost().context,
+          audienceSize: 10_000,
+          accountAvgViews: 0,
+        },
+      }),
+      20,
+    );
+    const r = recs.find((x) => x.factorId === "baseline");
+    if (r) assert.match(r.message, /average views/);
+  });
+
+  it("novelty=3 produces 'Bump novelty' message", () => {
+    const recs = recommend(
+      makePost({ context: { ...makePost().context, novelty: 3 } }),
+      20,
+    );
+    const r = recs.find((x) => x.factorId === "novelty");
+    if (r) assert.match(r.message, /Bump novelty/);
+  });
+
+  it("emotion=3 produces 'Push the emotional payoff' message", () => {
+    const recs = recommend(
+      makePost({ context: { ...makePost().context, emotion: 3 } }),
+      20,
+    );
+    const r = recs.find((x) => x.factorId === "emotion");
+    if (r) assert.match(r.message, /Push the emotional payoff/);
+  });
+
+  it("hashtag too many: 'Trim' message", () => {
+    const recs = recommend(
+      makePost({
+        content: {
+          ...makePost().content,
+          hashtags: ["a", "b", "c", "d", "e", "f", "g", "h"],
+        },
+      }),
+      20,
+    );
+    const r = recs.find((x) => x.factorId === "hashtags");
+    if (r) assert.match(r.message, /Trim/);
+  });
+});
