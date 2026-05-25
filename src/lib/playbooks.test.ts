@@ -306,4 +306,49 @@ describe("PLAYBOOKS catalogue integrity", () => {
       assert.ok(p.platforms.length > 0, `${p.id} has no platforms`);
     }
   });
+
+  it("every playbook has a non-empty name and description", () => {
+    for (const p of PLAYBOOKS) {
+      assert.ok(p.name.trim().length > 0, `${p.id} missing name`);
+      assert.ok(p.description.trim().length > 0, `${p.id} missing description`);
+    }
+  });
+
+  it("every playbook has at least one note", () => {
+    for (const p of PLAYBOOKS) {
+      assert.ok(p.notes.length > 0, `${p.id} has no notes`);
+    }
+  });
+
+  it("every playbook category is one of the declared options", () => {
+    const valid = new Set([
+      "hook",
+      "thread",
+      "carousel",
+      "longform",
+      "trend",
+      "engagement",
+    ]);
+    for (const p of PLAYBOOKS) {
+      assert.ok(valid.has(p.category), `${p.id} bad category ${p.category}`);
+    }
+  });
+
+  it("every supported platform has at least one applicable playbook", () => {
+    for (const platform of [
+      "tiktok",
+      "reels",
+      "shorts",
+      "x",
+      "threads",
+      "linkedin",
+      "instagram_feed",
+      "facebook",
+    ] as const) {
+      assert.ok(
+        playbooksFor(platform).length > 0,
+        `no playbook fits ${platform}`,
+      );
+    }
+  });
 });

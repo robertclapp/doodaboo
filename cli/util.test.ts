@@ -96,4 +96,72 @@ describe("row", () => {
     assert.match(row(undefined, "x"), /^— +x$/);
     assert.match(row(null as unknown as undefined, "x"), /^— +x$/);
   });
+
+  it("coerces numbers to strings and pads them", () => {
+    const out = row(42, "tail");
+    assert.match(out, /^42 +tail$/);
+  });
+
+  it("single-cell row is the value unpadded", () => {
+    assert.equal(row("only"), "only");
+  });
+
+  it("padded cells are at least 22 chars wide (PAD constant contract)", () => {
+    const out = row("a", "tail");
+    // Match the padded first cell width.
+    const padded = out.replace(/tail$/, "");
+    assert.ok(padded.length >= 22, `padded width ${padded.length}`);
+  });
+});
+
+describe("nonneg / bounded — additional edge cases", () => {
+  it("nonneg accepts fractional values", () => {
+    assert.equal(nonneg("0.5", "x"), 0.5);
+  });
+
+  it("nonneg error message names the flag", () => {
+    try {
+      nonneg("foo", "myflag");
+      assert.fail("should throw");
+    } catch (err) {
+      assert.match((err as Error).message, /--myflag/);
+    }
+  });
+
+  it("bounded rejects positive Infinity", () => {
+    assert.throws(() => bounded("Infinity", "x", 0, 100));
+  });
+
+  it("bounded rejects negative Infinity", () => {
+    assert.throws(() => bounded("-Infinity", "x", 0, 100));
+  });
+});
+
+describe("UsageError shape", () => {
+  it("has name 'UsageError'", () => {
+    assert.equal(new UsageError("x").name, "UsageError");
+  });
+
+  it("is an instance of Error", () => {
+    assert.ok(new UsageError("x") instanceof Error);
+  });
+});
+
+describe("parseArgs — more shapes", () => {
+  it("no-flags call returns empty values and empty positionals", () => {
+    const r = parseArgs([], {});
+    assert.deepEqual(r.positionals, []);
+    // Globals are always defined as the option spec but absent in values.
+    assert.equal(r.values.vault, undefined);
+    assert.equal(r.values.json, undefined);
+  });
+
+  it("positionals and named flags coexist", () => {
+    const r = parseArgs<{ title?: string }>(
+      ["one", "--title", "x", "two"],
+      { title: { type: "string" } },
+    );
+    assert.deepEqual(r.positionals, ["one", "two"]);
+    assert.equal(r.values.title, "x");
+  });
 });

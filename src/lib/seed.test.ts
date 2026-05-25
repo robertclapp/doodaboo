@@ -161,4 +161,76 @@ describe("seedPosts integrity", () => {
       assert.ok(["24h", "7d", "30d"].includes(p.threshold.window));
     }
   });
+
+  it("post ids are unique and po_-prefixed", () => {
+    const ids = new Set(seedPosts.map((p) => p.id));
+    assert.equal(ids.size, seedPosts.length);
+    for (const p of seedPosts) assert.match(p.id, /^po_/);
+  });
+
+  it("every post has well-formed content (hook + caption + hashtags array)", () => {
+    for (const p of seedPosts) {
+      assert.equal(typeof p.content.hook, "string");
+      assert.equal(typeof p.content.caption, "string");
+      assert.ok(Array.isArray(p.content.hashtags));
+    }
+  });
+});
+
+describe("seedUsers / seedProjects deeper integrity", () => {
+  it("user handles are unique", () => {
+    const handles = new Set(seedUsers.map((u) => u.handle));
+    assert.equal(handles.size, seedUsers.length);
+  });
+
+  it("every user has a hex color", () => {
+    for (const u of seedUsers) {
+      assert.match(u.color, /^#[0-9a-f]{6}$/i, `bad color on ${u.id}`);
+    }
+  });
+
+  it("project keys are unique", () => {
+    const keys = new Set(seedProjects.map((p) => p.key));
+    assert.equal(keys.size, seedProjects.length);
+  });
+});
+
+describe("seedTasks invariants", () => {
+  it("every task has at least one activity entry (the 'Created' one)", () => {
+    for (const t of seedTasks) {
+      assert.ok(t.activity.length > 0, `task ${t.id} has empty activity`);
+    }
+  });
+
+  it("all task statuses are from the declared Status union", () => {
+    const valid = new Set([
+      "backlog",
+      "todo",
+      "in_progress",
+      "in_review",
+      "done",
+      "cancelled",
+    ]);
+    for (const t of seedTasks) {
+      assert.ok(valid.has(t.status), `bad status on ${t.id}: ${t.status}`);
+    }
+  });
+
+  it("all task priorities are from the declared Priority union", () => {
+    const valid = new Set(["urgent", "high", "medium", "low", "none"]);
+    for (const t of seedTasks) {
+      assert.ok(valid.has(t.priority), `bad priority on ${t.id}`);
+    }
+  });
+
+  it("all task types are 'task' or 'issue'", () => {
+    for (const t of seedTasks) {
+      assert.ok(["task", "issue"].includes(t.type), `bad type on ${t.id}`);
+    }
+  });
+
+  it("task ids are unique", () => {
+    const ids = new Set(seedTasks.map((t) => t.id));
+    assert.equal(ids.size, seedTasks.length);
+  });
 });

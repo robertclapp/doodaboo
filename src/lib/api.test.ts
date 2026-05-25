@@ -125,4 +125,51 @@ describe("handle", () => {
       console.error = origError;
     }
   });
+
+  it("maps VaultCorruptError (non-VaultNotFoundError) to 500", async () => {
+    class VaultCorruptError extends Error {
+      constructor() {
+        super("corrupt");
+        this.name = "VaultCorruptError";
+      }
+    }
+    const origError = console.error;
+    console.error = () => {};
+    try {
+      const res = await handle(async () => {
+        throw new VaultCorruptError();
+      });
+      // VaultCorruptError isn't specially handled, so it falls to 500.
+      assert.equal(res.status, 500);
+    } finally {
+      console.error = origError;
+    }
+  });
+
+  it("preserves the 503 message from VaultNotFoundError", async () => {
+    class VaultNotFoundError extends Error {
+      constructor() {
+        super("vault missing at /tmp/x");
+        this.name = "VaultNotFoundError";
+      }
+    }
+    const res = await handle(async () => {
+      throw new VaultNotFoundError();
+    });
+    assert.equal(res.status, 503);
+    const body = (await res.json()) as any;
+    assert.equal(body.error, "vault missing at /tmp/x");
+  });
+});
+
+describe("json — serialization shapes", () => {
+  it("serializes null body", async () => {
+    const res = json(null);
+    assert.equal(await res.text(), "null");
+  });
+
+  it("serializes arrays", async () => {
+    const res = json([1, 2, 3]);
+    assert.deepEqual(await res.json(), [1, 2, 3]);
+  });
 });

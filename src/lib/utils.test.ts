@@ -198,3 +198,29 @@ describe("formatDateShort", () => {
     assert.notEqual(out, "—");
   });
 });
+
+describe("utils boundary cases", () => {
+  it("timeAgo: exactly 0s emits '0s'", () => {
+    const t = new Date(Date.now()).toISOString();
+    assert.match(timeAgo(t), /^0s$/);
+  });
+
+  it("dueStatus: midnight start-of-today is classified 'today'", () => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    assert.equal(dueStatus(start.toISOString(), Date.now()), "today");
+  });
+
+  it("dueStatus: returns 'none' for empty string", () => {
+    assert.equal(dueStatus("", Date.now()), "none");
+  });
+
+  it("slug: caps at 4 chars even with many valid alphanumerics", () => {
+    assert.equal(slug("ABCDEFG").length, 4);
+    assert.equal(slug("12345").length, 4);
+  });
+
+  it("initials: handles all-space input gracefully", () => {
+    assert.equal(initials("     "), "");
+  });
+});
