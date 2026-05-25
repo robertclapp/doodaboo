@@ -89,4 +89,18 @@ describe("createTauriStorage", () => {
       console.error = origErr;
     }
   });
+
+  it("setItem resolves without throwing when @tauri-apps/api is unavailable", async () => {
+    const origErr = console.error;
+    console.error = () => {};
+    try {
+      const s = createTauriStorage();
+      // The catch branch swallows the error so persistence failures
+      // don't crash the zustand store in non-Tauri environments.
+      const p = s.setItem("k", { state: {}, version: 0 }) as Promise<void>;
+      await assert.doesNotReject(p);
+    } finally {
+      console.error = origErr;
+    }
+  });
 });

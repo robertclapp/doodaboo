@@ -9,8 +9,11 @@ import {
   error,
   handle,
   json,
+  mutateWorkspace,
+  readWorkspace,
   safeJson,
 } from "./api";
+import { createTask } from "./mutations";
 import { initVault } from "./vault";
 
 describe("json", () => {
@@ -220,6 +223,80 @@ describe("ensureVault", () => {
       if (prev === undefined) delete process.env.DOODABOO_VAULT;
       else process.env.DOODABOO_VAULT = prev;
       await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("readWorkspace / mutateWorkspace", () => {
+  let prev: string | undefined;
+  let root: string;
+
+  async function setup() {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), "doodaboo-api-"));
+    await initVault(root, { force: true });
+    prev = process.env.DOODABOO_VAULT;
+    process.env.DOODABOO_VAULT = root;
+  }
+
+  async function teardown() {
+    if (prev === undefined) delete process.env.DOODABOO_VAULT;
+    else process.env.DOODABOO_VAULT = prev;
+    await fs.rm(root, { recursive: true, force: true });
+  }
+
+  it("readWorkspace returns the current state from disk", async () => {
+    await setup();
+    try {
+      const s = await readWorkspace();
+      assert.ok(s.users.length > 0);
+      assert.ok(s.projects.length > 0);
+    } finally {
+      await teardown();
+    }
+  });
+
+  it("mutateWorkspace returns the mutator's result and persists state", async () => {
+    await setup();
+    try {
+      const taskId = await mutateWorkspace((s) => {
+        const r = createTask(s, {
+          projectId: s.projects[0].id,
+          title: "via mutateWorkspace",
+        });
+        return { state: r.state, result: r.task.id };
+      });
+      assert.match(taskId, /^t_/);
+      const reloaded = await readWorkspace();
+      assert.ok(reloaded.tasks.some((t) => t.id === taskId));
+    } finally {
+      await teardown();
+    }
+  });
+
+  it("mutateWorkspace persists changes across sequential calls", async () => {
+    await setup();
+    try {
+      const id1 = await mutateWorkspace((s) => {
+        const r = createTask(s, {
+          projectId: s.projects[0].id,
+          title: "first",
+        });
+        return { state: r.state, result: r.task.id };
+      });
+      const id2 = await mutateWorkspace((s) => {
+        const r = createTask(s, {
+          projectId: s.projects[0].id,
+          title: "second",
+        });
+        return { state: r.state, result: r.task.id };
+      });
+      const final = await readWorkspace();
+      const titles = final.tasks
+        .filter((t) => t.id === id1 || t.id === id2)
+        .map((t) => t.title);
+      assert.deepEqual(titles.sort(), ["first", "second"].sort());
+    } finally {
+      await teardown();
     }
   });
 });

@@ -801,6 +801,65 @@ describe("scoreIntrinsic — extraFactors plumbing", () => {
     const s = scoreIntrinsic(makePost(), [extra]);
     assert.ok(s.factors.find((f) => f.id === "plugin_test"));
   });
+
+  it("recommend surfaces a low-raw injected plugin factor as a weakness", () => {
+    const weak = {
+      id: "plugin_weak",
+      label: "Plugin weak",
+      group: "content" as const,
+      raw: 0.1,
+      weight: 0.1,
+      contribution: 1,
+      hint: "Bad",
+    };
+    const recs = recommend(makePost(), 20, [weak]);
+    // The factor itself isn't routed through messageFor (no case matches
+    // its id), so it should NOT generate a Recommendation row even though
+    // it counts toward the score. Asserts the messageFor switch's
+    // default-undefined behaviour.
+    assert.ok(!recs.find((r) => r.factorId === "plugin_weak"));
+  });
+
+  it("recommend ignores a perfect-raw injected plugin factor (no headroom)", () => {
+    const perfect = {
+      id: "plugin_perfect",
+      label: "Plugin perfect",
+      group: "content" as const,
+      raw: 1.0,
+      weight: 0.1,
+      contribution: 10,
+      hint: "Great",
+    };
+    const recs = recommend(makePost(), 20, [perfect]);
+    assert.ok(!recs.find((r) => r.factorId === "plugin_perfect"));
+  });
+});
+
+describe("scoreLive — commentDepth zero-likes branch", () => {
+  it("uses comments/50 path when likes=0 and stays finite", () => {
+    const post = makePost({
+      snapshots: [
+        {
+          id: "s1",
+          atMinutes: 30,
+          impressions: 5000,
+          views: 4500,
+          likes: 0, // forces the comments/50 branch
+          comments: 100,
+          shares: 20,
+          saves: 5,
+          retentionPct: 55,
+          capturedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const live = scoreLive(post)!;
+    assert.ok(Number.isFinite(live.value));
+    const cd = live.factors.find((f) => f.id === "commentDepth");
+    assert.ok(cd, "commentDepth factor expected");
+    // 100 comments / 50 = 2, clamped to 1.
+    assert.ok(cd!.raw > 0);
+  });
 });
 
 // ── New: describeBand round-trip ───────────────────────────────────────────

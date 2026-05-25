@@ -4,12 +4,14 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  defaultVaultRoot,
   initVault,
   loadWorkspace,
   migrate,
   saveWorkspace,
   vaultExists,
   vaultPaths,
+  watchWorkspace,
   withWorkspace,
   VaultCorruptError,
   VaultNotFoundError,
@@ -362,5 +364,76 @@ describe("VaultNotFoundError / VaultCorruptError shape", () => {
   it("VaultCorruptError has the expected name", () => {
     const e = new VaultCorruptError("bad");
     assert.equal(e.name, "VaultCorruptError");
+  });
+});
+
+describe("defaultVaultRoot", () => {
+  it("uses DOODABOO_VAULT env var when set", () => {
+    const prev = process.env.DOODABOO_VAULT;
+    process.env.DOODABOO_VAULT = "/tmp/env-vault";
+    try {
+      assert.equal(defaultVaultRoot(), "/tmp/env-vault");
+    } finally {
+      if (prev === undefined) delete process.env.DOODABOO_VAULT;
+      else process.env.DOODABOO_VAULT = prev;
+    }
+  });
+
+  it("falls back to ~/.doodaboo when DOODABOO_VAULT is unset", () => {
+    const prev = process.env.DOODABOO_VAULT;
+    delete process.env.DOODABOO_VAULT;
+    try {
+      const root = defaultVaultRoot();
+      assert.ok(root.endsWith(".doodaboo"), `got ${root}`);
+    } finally {
+      if (prev !== undefined) process.env.DOODABOO_VAULT = prev;
+    }
+  });
+});
+
+describe("withWorkspace error handling", () => {
+  it("propagates errors thrown by the mutator", async () => {
+    const root = await tmpVault();
+    await initVault(root, { force: true });
+    await assert.rejects(
+      withWorkspace(() => {
+        throw new Error("boom from mutator");
+      }, root),
+      /boom from mutator/,
+    );
+  });
+});
+
+describe("saveWorkspace — backup pruning", () => {
+  it("prunes backups beyond MAX_BACKUPS=20", async () => {
+    const root = await tmpVault();
+    await initVault(root, { force: true });
+    const paths = vaultPaths(root);
+    const ws = await loadWorkspace(root);
+
+    // Create 25 saves to exceed the 20-backup ceiling. The save dance
+    // names backups by ISO timestamp, so we need them to differ.
+    for (let i = 0; i < 25; i++) {
+      await new Promise((r) => setTimeout(r, 2));
+      await saveWorkspace(ws, root);
+    }
+
+    const backups = (await fs.readdir(paths.backupsDir)).filter(
+      (n) => n.startsWith("workspace-") && n.endsWith(".json"),
+    );
+    assert.ok(
+      backups.length <= 20,
+      `expected ≤20 backups, found ${backups.length}`,
+    );
+  });
+});
+
+describe("watchWorkspace", () => {
+  it("returns a cleanup function that doesn't throw when invoked", async () => {
+    const root = await tmpVault();
+    await initVault(root, { force: true });
+    const stop = watchWorkspace(() => {}, root);
+    assert.equal(typeof stop, "function");
+    assert.doesNotThrow(() => stop());
   });
 });
