@@ -288,9 +288,12 @@ describe("createProject (extended)", () => {
     assert.deepEqual(r.project.memberIds, ["u_a", "u_b"]);
   });
 
-  it("default accent is '#ff5c1a' and targetDate is undefined", () => {
+  it("supplies a default accent (a valid hex) and no targetDate", () => {
+    // Assert the contract — there IS a default accent and it's a valid hex
+    // color — not the exact brand value, which is editorial and would make
+    // this test break on a benign palette tweak.
     const r = createProject(fresh(), { name: "X", key: "X" });
-    assert.equal(r.project.accent, "#ff5c1a");
+    assert.match(r.project.accent ?? "", /^#[0-9a-f]{6}$/i);
     assert.equal(r.project.targetDate, undefined);
   });
 

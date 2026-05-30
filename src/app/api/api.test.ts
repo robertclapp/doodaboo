@@ -8,9 +8,12 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { initVault } from "@/lib/vault";
+import {
+  createTempVaultEnv,
+  silenceConsole,
+  TempVaultEnv,
+} from "@/lib/test-utils";
 
 // Use cwd-relative imports through @/ alias so tsx + tsconfig paths apply.
 import * as healthRoute from "./health/route";
@@ -26,29 +29,20 @@ import * as hooksRoute from "./hooks/route";
 import * as playbooksRoute from "./playbooks/route";
 import * as playbookIdRoute from "./playbooks/[playbookId]/route";
 
-async function makeVault(): Promise<string> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "doodaboo-api-"));
-  await initVault(root, { force: true });
-  return root;
-}
-
 function ctx<T extends Record<string, string>>(params: T) {
   return { params: Promise.resolve(params) };
 }
 
-let prevVault: string | undefined;
+let vault: TempVaultEnv;
 let vaultRoot: string;
 
 beforeEach(async () => {
-  vaultRoot = await makeVault();
-  prevVault = process.env.DOODABOO_VAULT;
-  process.env.DOODABOO_VAULT = vaultRoot;
+  vault = await createTempVaultEnv();
+  vaultRoot = vault.root;
 });
 
 afterEach(async () => {
-  if (prevVault === undefined) delete process.env.DOODABOO_VAULT;
-  else process.env.DOODABOO_VAULT = prevVault;
-  await fs.rm(vaultRoot, { recursive: true, force: true });
+  await vault.restore();
 });
 
 // ── /api/health ────────────────────────────────────────────────────────────
@@ -339,9 +333,7 @@ describe("/api/posts/[id]/snapshots", () => {
 
   it("POST 500s with a useful error for invalid (negative) values", async () => {
     // addSnapshot throws; handle() wraps as 500.
-    const origError = console.error;
-    console.error = () => {};
-    try {
+    await silenceConsole(["error"], async () => {
       const id = await firstPostId();
       const req = new Request("http://t/", {
         method: "POST",
@@ -359,9 +351,7 @@ describe("/api/posts/[id]/snapshots", () => {
       assert.equal(res.status, 500);
       const body = (await res.json()) as any;
       assert.match(body.error, /non-negative/);
-    } finally {
-      console.error = origError;
-    }
+    });
   });
 });
 
@@ -406,12 +396,8 @@ describe("/api/posts/[id]/score", () => {
       "utf-8",
     );
 
-    // Suppress the expected warning log.
-    const origWarn = console.warn;
-    const origLog = console.log;
-    console.warn = () => {};
-    console.log = () => {};
-    try {
+    // Suppress the expected warning + plugin log.
+    await silenceConsole(["warn", "log"], async () => {
       const list = await postsRoute.GET(new Request("http://t/api/posts"));
       const id = ((await list.json()) as any[])[0].id;
       const res = await postScoreRoute.GET(
@@ -421,10 +407,7 @@ describe("/api/posts/[id]/score", () => {
       assert.equal(res.status, 200, "scoring must survive broken plugin");
       const body = (await res.json()) as any;
       assert.ok(body.intrinsic);
-    } finally {
-      console.warn = origWarn;
-      console.log = origLog;
-    }
+    });
   });
 });
 

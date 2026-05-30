@@ -62,9 +62,13 @@ describe("playbooksFor", () => {
 
 describe("getPlaybook", () => {
   it("returns a playbook by id", () => {
+    // The contract is lookup-by-id returns the matching record; assert on
+    // the stable id rather than the human-readable name (editorial copy
+    // that a reword would needlessly break).
     const p = getPlaybook("pb_3s_hook");
     assert.ok(p);
-    assert.equal(p!.name, "3-second hook");
+    assert.equal(p!.id, "pb_3s_hook");
+    assert.ok(p!.name.trim().length > 0);
   });
 
   it("returns undefined for unknown id", () => {

@@ -123,35 +123,40 @@ describe("timeAgo", () => {
 });
 
 describe("dueStatus", () => {
-  // Pin "now" to a known UTC midnight + 12h so the local "today" window
-  // is well-defined for the test runner's timezone.
-  const startOfToday = new Date();
-  startOfToday.setHours(12, 0, 0, 0);
-  const now = startOfToday.getTime();
+  // Fully deterministic: pin `now` to a fixed instant and derive every due
+  // date from the SAME local-midnight the implementation computes. Because
+  // dueStatus now derives its day window from `now` (not the wall clock),
+  // these results are independent of the runner's clock and timezone.
+  const DAY = 24 * 3600_000;
+  const now = Date.parse("2026-05-30T12:00:00.000Z");
+  // Local midnight of `now`, matching dueStatus's own `new Date(now).setHours(0,..)`.
+  const midnight = (() => {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  })();
 
   it("returns 'none' when no date provided", () => {
     assert.equal(dueStatus(undefined, now), "none");
   });
 
-  it("returns 'overdue' for a past date", () => {
-    const past = new Date(now - 5 * 24 * 3600_000).toISOString();
+  it("returns 'overdue' for a date before today's start", () => {
+    const past = new Date(midnight - 5 * DAY).toISOString();
     assert.equal(dueStatus(past, now), "overdue");
   });
 
-  it("returns 'today' for today's date", () => {
-    // Use midnight-local today
-    const startLocal = new Date();
-    startLocal.setHours(8, 0, 0, 0);
-    assert.equal(dueStatus(startLocal.toISOString(), now), "today");
+  it("returns 'today' for a date inside today's local window", () => {
+    const middayToday = new Date(midnight + 8 * 3600_000).toISOString();
+    assert.equal(dueStatus(middayToday, now), "today");
   });
 
   it("returns 'soon' for a date within the next 7 days", () => {
-    const inThree = new Date(now + 3 * 24 * 3600_000).toISOString();
+    const inThree = new Date(midnight + 3 * DAY).toISOString();
     assert.equal(dueStatus(inThree, now), "soon");
   });
 
   it("returns 'later' for a date >7 days out", () => {
-    const inMonth = new Date(now + 30 * 24 * 3600_000).toISOString();
+    const inMonth = new Date(midnight + 30 * DAY).toISOString();
     assert.equal(dueStatus(inMonth, now), "later");
   });
 });
@@ -205,16 +210,22 @@ describe("utils boundary cases", () => {
     assert.match(timeAgo(t), /^0s$/);
   });
 
-  it("dueStatus: midnight start-of-today is classified 'today'", () => {
-    const start = new Date();
+  it("dueStatus: the exact start-of-today boundary is 'today'", () => {
+    // Pin now; derive the local-midnight the impl uses, then probe the
+    // inclusive lower edge of the today window.
+    const now = Date.parse("2026-05-30T12:00:00.000Z");
+    const start = new Date(now);
     start.setHours(0, 0, 0, 0);
-    assert.equal(dueStatus(start.toISOString(), Date.now()), "today");
+    assert.equal(dueStatus(new Date(start.getTime()).toISOString(), now), "today");
   });
 
-  it("dueStatus: end-of-today (23:59:59.999) is still 'today'", () => {
-    const end = new Date();
-    end.setHours(23, 59, 59, 999);
-    assert.equal(dueStatus(end.toISOString(), Date.now()), "today");
+  it("dueStatus: the last millisecond of today is still 'today'", () => {
+    const now = Date.parse("2026-05-30T12:00:00.000Z");
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    // todayEnd is exclusive, so the last in-window instant is end-1ms.
+    const lastMs = start.getTime() + 24 * 3600_000 - 1;
+    assert.equal(dueStatus(new Date(lastMs).toISOString(), now), "today");
   });
 
   it("dueStatus: returns 'none' for empty string", () => {

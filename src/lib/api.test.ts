@@ -1,8 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { promises as fs } from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import {
   ApiError,
   ensureVault,
@@ -14,7 +11,7 @@ import {
   safeJson,
 } from "./api";
 import { createTask } from "./mutations";
-import { initVault } from "./vault";
+import { silenceConsole, withTempVault } from "./test-utils";
 
 describe("json", () => {
   it("returns 200 with no-store cache header by default", async () => {
@@ -113,31 +110,23 @@ describe("handle", () => {
 
   it("falls through unknown errors as 500", async () => {
     // Suppress the expected error log.
-    const origError = console.error;
-    console.error = () => {};
-    try {
+    await silenceConsole(["error"], async () => {
       const res = await handle(async () => {
         throw new Error("kaboom");
       });
       assert.equal(res.status, 500);
       assert.deepEqual(await res.json(), { error: "kaboom" });
-    } finally {
-      console.error = origError;
-    }
+    });
   });
 
   it("handles non-Error thrown values as 500 with generic message", async () => {
-    const origError = console.error;
-    console.error = () => {};
-    try {
+    await silenceConsole(["error"], async () => {
       const res = await handle(async () => {
         throw "string-thrown";
       });
       assert.equal(res.status, 500);
       assert.deepEqual(await res.json(), { error: "Internal server error" });
-    } finally {
-      console.error = origError;
-    }
+    });
   });
 
   it("maps VaultCorruptError (non-VaultNotFoundError) to 500", async () => {
@@ -147,17 +136,13 @@ describe("handle", () => {
         this.name = "VaultCorruptError";
       }
     }
-    const origError = console.error;
-    console.error = () => {};
-    try {
+    await silenceConsole(["error"], async () => {
       const res = await handle(async () => {
         throw new VaultCorruptError();
       });
       // VaultCorruptError isn't specially handled, so it falls to 500.
       assert.equal(res.status, 500);
-    } finally {
-      console.error = origError;
-    }
+    });
   });
 
   it("preserves the 503 message from VaultNotFoundError", async () => {
@@ -195,69 +180,37 @@ describe("json — serialization shapes", () => {
 });
 
 describe("ensureVault", () => {
-  let prev: string | undefined;
   it("returns ok=true when the vault exists", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "doodaboo-api-"));
-    await initVault(root, { force: true });
-    prev = process.env.DOODABOO_VAULT;
-    process.env.DOODABOO_VAULT = root;
-    try {
+    await withTempVault(async () => {
       const r = await ensureVault();
       assert.equal(r.ok, true);
-    } finally {
-      if (prev === undefined) delete process.env.DOODABOO_VAULT;
-      else process.env.DOODABOO_VAULT = prev;
-      await fs.rm(root, { recursive: true, force: true });
-    }
+    });
   });
 
   it("returns ok=false with a reason when the vault is missing", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "doodaboo-api-"));
-    prev = process.env.DOODABOO_VAULT;
-    process.env.DOODABOO_VAULT = root;
-    try {
-      const r = await ensureVault();
-      assert.equal(r.ok, false);
-      assert.match(r.reason ?? "", /doodaboo init/);
-    } finally {
-      if (prev === undefined) delete process.env.DOODABOO_VAULT;
-      else process.env.DOODABOO_VAULT = prev;
-      await fs.rm(root, { recursive: true, force: true });
-    }
+    // init:false → temp dir with no workspace.json.
+    await withTempVault(
+      async () => {
+        const r = await ensureVault();
+        assert.equal(r.ok, false);
+        assert.match(r.reason ?? "", /doodaboo init/);
+      },
+      { init: false },
+    );
   });
 });
 
 describe("readWorkspace / mutateWorkspace", () => {
-  let prev: string | undefined;
-  let root: string;
-
-  async function setup() {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "doodaboo-api-"));
-    await initVault(root, { force: true });
-    prev = process.env.DOODABOO_VAULT;
-    process.env.DOODABOO_VAULT = root;
-  }
-
-  async function teardown() {
-    if (prev === undefined) delete process.env.DOODABOO_VAULT;
-    else process.env.DOODABOO_VAULT = prev;
-    await fs.rm(root, { recursive: true, force: true });
-  }
-
   it("readWorkspace returns the current state from disk", async () => {
-    await setup();
-    try {
+    await withTempVault(async () => {
       const s = await readWorkspace();
       assert.ok(s.users.length > 0);
       assert.ok(s.projects.length > 0);
-    } finally {
-      await teardown();
-    }
+    });
   });
 
   it("mutateWorkspace returns the mutator's result and persists state", async () => {
-    await setup();
-    try {
+    await withTempVault(async () => {
       const taskId = await mutateWorkspace((s) => {
         const r = createTask(s, {
           projectId: s.projects[0].id,
@@ -268,14 +221,11 @@ describe("readWorkspace / mutateWorkspace", () => {
       assert.match(taskId, /^t_/);
       const reloaded = await readWorkspace();
       assert.ok(reloaded.tasks.some((t) => t.id === taskId));
-    } finally {
-      await teardown();
-    }
+    });
   });
 
   it("mutateWorkspace persists changes across sequential calls", async () => {
-    await setup();
-    try {
+    await withTempVault(async () => {
       const id1 = await mutateWorkspace((s) => {
         const r = createTask(s, {
           projectId: s.projects[0].id,
@@ -295,8 +245,6 @@ describe("readWorkspace / mutateWorkspace", () => {
         .filter((t) => t.id === id1 || t.id === id2)
         .map((t) => t.title);
       assert.deepEqual(titles.sort(), ["first", "second"].sort());
-    } finally {
-      await teardown();
-    }
+    });
   });
 });

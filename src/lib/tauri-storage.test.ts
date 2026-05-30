@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createTauriStorage, isTauri } from "./tauri-storage";
+import { silenceConsole } from "./test-utils";
 
 describe("isTauri", () => {
   it("returns false when window is undefined (SSR)", () => {
@@ -94,31 +95,22 @@ describe("createTauriStorage", () => {
   });
 
   it("getItem returns null when @tauri-apps/api is not available", async () => {
-    // Suppress the expected console.error from the failed dynamic import.
-    const origErr = console.error;
-    console.error = () => {};
-    try {
+    // The dynamic import of @tauri-apps/api/core fails outside Tauri and the
+    // catch branch logs + returns null; silence the expected error.
+    await silenceConsole(["error"], async () => {
       const s = createTauriStorage();
       const r = await s.getItem("anything");
-      // Outside Tauri, the dynamic import of @tauri-apps/api/core fails,
-      // and getItem returns null per the catch branch.
       assert.equal(r, null);
-    } finally {
-      console.error = origErr;
-    }
+    });
   });
 
   it("setItem resolves without throwing when @tauri-apps/api is unavailable", async () => {
-    const origErr = console.error;
-    console.error = () => {};
-    try {
+    await silenceConsole(["error"], async () => {
       const s = createTauriStorage();
       // The catch branch swallows the error so persistence failures
       // don't crash the zustand store in non-Tauri environments.
       const p = s.setItem("k", { state: {}, version: 0 }) as Promise<void>;
       await assert.doesNotReject(p);
-    } finally {
-      console.error = origErr;
-    }
+    });
   });
 });

@@ -86,7 +86,12 @@ export type DueStatus = "overdue" | "today" | "soon" | "later" | "none";
 export function dueStatus(iso?: string, now = Date.now()): DueStatus {
   if (!iso) return "none";
   const due = new Date(iso).getTime();
-  const startOfToday = new Date();
+  // Derive the "today" window from `now`, not from a fresh `new Date()`.
+  // The default `now` is the real clock, so production behavior is
+  // unchanged — but passing an explicit `now` now fully determines the
+  // classification, which keeps tests deterministic instead of coupling
+  // them to the wall clock / a midnight rollover mid-run.
+  const startOfToday = new Date(now);
   startOfToday.setHours(0, 0, 0, 0);
   const todayStart = startOfToday.getTime();
   const todayEnd = todayStart + 24 * 60 * 60 * 1000;
