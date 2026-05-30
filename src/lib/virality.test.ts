@@ -395,7 +395,7 @@ describe("projectThreshold", () => {
     assert.ok(b.projected >= a.projected);
   });
 
-  it("returns probability=0 when threshold value is 0", () => {
+  it("clamps the ratio to 0 when threshold value is 0 → sigmoid(-1.5)≈0.182", () => {
     const post = makePost({
       threshold: { metric: "views", value: 0, window: "7d" },
       snapshots: [
@@ -414,8 +414,13 @@ describe("projectThreshold", () => {
       ],
     });
     const p = projectThreshold(post)!;
-    // With value=0 the ratio guard returns 0 → sigmoid(-1.5) ≈ 0.18
-    assert.ok(p.probability < 0.5);
+    // The `value > 0` guard makes ratio=0, so probability is the fixed
+    // sigmoid((0-1)*1.5) ≈ 0.1824 — NOT literally 0. Pin it tightly so a
+    // regression in the guard or sigmoid coefficient is actually caught.
+    assert.ok(
+      Math.abs(p.probability - 0.1824) < 0.001,
+      `probability was ${p.probability}`,
+    );
   });
 
   it("higher engagement → higher hit probability", () => {
@@ -693,16 +698,21 @@ describe("recommend — message branches", () => {
     );
   });
 
-  it("hashtag rec uses 'hashtag' singular when off by 1", () => {
-    // tiktok ideal=4. Provide 3 hashtags → diff=-1 → "Add 1 more hashtag"
+  it("hashtag rec uses plural 'hashtags' when several short of target", () => {
+    // tiktok ideal=4. Zero hashtags → diff=-4, weak enough to recommend.
+    // (A 1-short post scores too high to ever surface a hashtag rec, so the
+    // singular branch is unreachable via recommend() — we assert the plural
+    // wording on a case that actually fires instead of guarding the
+    // assertion behind an `if` that silently passes.)
     const recs = recommend(
       makePost({
-        content: { ...makePost().content, hashtags: ["a", "b", "c"] },
+        content: { ...makePost().content, hashtags: [] },
       }),
       20,
     );
     const r = recs.find((x) => x.factorId === "hashtags");
-    if (r) assert.match(r.message, /1 more hashtag(?!s)/);
+    assert.ok(r, "expected a hashtags recommendation to fire");
+    assert.match(r!.message, /Add 4 more hashtags/);
   });
 
   it("trendingAudio suggestion only appears on tiktok/reels", () => {
@@ -721,14 +731,21 @@ describe("recommend — message branches", () => {
   });
 
   it("flags neutral sentiment as a weakness", () => {
+    // threads weights sentiment highest, so the factor has enough headroom
+    // to surface a recommendation when sentiment is neutral. (On tiktok the
+    // sentiment weight is tiny and the rec never fires, which is why the
+    // earlier version of this test asserted nothing.)
     const recs = recommend(
-      makePost({ context: { ...makePost().context, sentiment: "neutral" } }),
+      makePost({
+        platform: "threads",
+        content: { ...makePost().content, format: "text" },
+        context: { ...makePost().context, sentiment: "neutral" },
+      }),
       20,
     );
-    if (recs.find((r) => r.factorId === "sentiment")) {
-      // good — message branch fired
-      assert.ok(true);
-    }
+    const r = recs.find((x) => x.factorId === "sentiment");
+    assert.ok(r, "expected a sentiment recommendation to fire");
+    assert.match(r!.message, /clear stance/);
   });
 
   it("respects max parameter cap", () => {
@@ -760,28 +777,34 @@ describe("recommend — message branches", () => {
     assert.ok(recs.length <= 2);
   });
 
-  it("postingTime suggestion differentiates hour-only vs day-only off-peak", () => {
-    // hour OK, day off → "Shift to a peak day"
-    const dayOff = recommend(
-      makePost({
-        platform: "tiktok", // peakHours include 20, peakDays=[2,3,4,6]
-        context: { ...makePost().context, postingHour: 20, dayOfWeek: 0 },
-      }),
-      20,
-    );
-    const r1 = dayOff.find((r) => r.factorId === "postingTime");
-    if (r1) assert.match(r1.message, /peak day/);
+  it("postingTime suggestion fires for hour-off and fully-off windows", () => {
+    // LinkedIn weights postingTime highest (12), so the factor has enough
+    // headroom to surface. peakHours=[7,8,9,12,13,17], peakDays=[1,2,3,4].
+    // A correct hour alone keeps timing quality high enough that the
+    // "peak day" (day-only-off) message never reaches the recommend
+    // threshold, so we assert the two cases that genuinely fire.
+    const base = makePost({
+      platform: "linkedin",
+      content: { ...makePost().content, format: "text" },
+    });
 
-    // day OK, hour off
+    // hour off, day OK → "Shift posting hour into the peak window"
     const hourOff = recommend(
-      makePost({
-        platform: "tiktok",
-        context: { ...makePost().context, postingHour: 4, dayOfWeek: 3 },
-      }),
+      { ...base, context: { ...base.context, postingHour: 3, dayOfWeek: 2 } },
       20,
     );
-    const r2 = hourOff.find((r) => r.factorId === "postingTime");
-    if (r2) assert.match(r2.message, /peak window/);
+    const r1 = hourOff.find((r) => r.factorId === "postingTime");
+    assert.ok(r1, "expected a postingTime recommendation (hour off)");
+    assert.match(r1!.message, /peak window/);
+
+    // hour AND day off → "Move to a peak window: <days> at <hours>"
+    const bothOff = recommend(
+      { ...base, context: { ...base.context, postingHour: 3, dayOfWeek: 0 } },
+      20,
+    );
+    const r2 = bothOff.find((r) => r.factorId === "postingTime");
+    assert.ok(r2, "expected a postingTime recommendation (fully off-peak)");
+    assert.match(r2!.message, /Move to a peak window/);
   });
 });
 
@@ -904,7 +927,8 @@ describe("platform factor filters", () => {
       20,
     );
     const r = recs.find((x) => x.factorId === "format");
-    if (r) assert.match(r.message, /text/);
+    assert.ok(r, "expected a format recommendation on an x video post");
+    assert.match(r!.message, /text/);
   });
 
   it("format recommendation does NOT surface when already optimal", () => {
@@ -1112,72 +1136,78 @@ describe("projectThreshold — edge cases", () => {
 // ── New: recommend message branches (granular) ─────────────────────────────
 
 describe("recommend — granular message branches", () => {
+  // Each input below is constructed so the named factor's recommendation
+  // genuinely fires. We assert it fired (assert.ok(r)) BEFORE matching the
+  // message — guarding the match behind `if (r)` would let the test pass
+  // silently if the recommendation ever stopped surfacing.
+  function rec(post: Post, factorId: string) {
+    const r = recommend(post, 20).find((x) => x.factorId === factorId);
+    assert.ok(r, `expected a ${factorId} recommendation to fire`);
+    return r!;
+  }
+
   it("caption empty: 'Caption is empty' message", () => {
-    const recs = recommend(
+    const r = rec(
       makePost({ content: { ...makePost().content, caption: "" } }),
-      20,
+      "caption",
     );
-    const r = recs.find((x) => x.factorId === "caption");
-    if (r) assert.match(r.message, /Caption is empty/);
+    assert.match(r.message, /Caption is empty/);
   });
 
   it("caption way over ideal: 'trim toward' message", () => {
-    const recs = recommend(
+    const r = rec(
       makePost({
         content: {
           ...makePost().content,
           caption: Array(1000).fill("x").join(""),
         },
       }),
-      20,
+      "caption",
     );
-    const r = recs.find((x) => x.factorId === "caption");
-    if (r) assert.match(r.message, /trim toward/);
+    assert.match(r.message, /trim toward/);
   });
 
   it("duration: 'Set the video duration' when missing", () => {
-    const recs = recommend(
-      makePost({
-        content: {
-          ...makePost().content,
-          durationSec: undefined,
-        },
-      }),
-      20,
+    const r = rec(
+      makePost({ content: { ...makePost().content, durationSec: undefined } }),
+      "duration",
     );
-    const r = recs.find((x) => x.factorId === "duration");
-    if (r) assert.match(r.message, /Set the video duration/);
+    assert.match(r.message, /Set the video duration/);
   });
 
   it("duration: 'too short' for below min", () => {
-    const recs = recommend(
+    const r = rec(
       makePost({ content: { ...makePost().content, durationSec: 3 } }),
-      20,
+      "duration",
     );
-    const r = recs.find((x) => x.factorId === "duration");
-    if (r) assert.match(r.message, /too short/);
+    assert.match(r.message, /too short/);
   });
 
   it("duration: 'long for this platform' when above max", () => {
-    const recs = recommend(
+    const r = rec(
       makePost({ content: { ...makePost().content, durationSec: 200 } }),
-      20,
+      "duration",
     );
-    const r = recs.find((x) => x.factorId === "duration");
-    if (r) assert.match(r.message, /long for this platform/);
+    assert.match(r.message, /long for this platform/);
   });
 
   it("baseline: 'Set audience size' when audienceSize=0", () => {
-    const recs = recommend(
-      makePost({ context: { ...makePost().context, audienceSize: 0 } }),
-      20,
+    // LinkedIn weights baseline high enough for the rec to fire; on tiktok
+    // the baseline weight is tiny and audienceSize=0 (quality 0.4) doesn't
+    // clear the headroom threshold.
+    const r = rec(
+      makePost({
+        platform: "linkedin",
+        content: { ...makePost().content, format: "text" },
+        context: { ...makePost().context, audienceSize: 0 },
+      }),
+      "baseline",
     );
-    const r = recs.find((x) => x.factorId === "baseline");
-    if (r) assert.match(r.message, /Set audience size/);
+    assert.match(r.message, /Set audience size/);
   });
 
   it("baseline: 'recent average views' when accountAvgViews=0 (audience>0)", () => {
-    const recs = recommend(
+    const r = rec(
       makePost({
         context: {
           ...makePost().context,
@@ -1185,41 +1215,37 @@ describe("recommend — granular message branches", () => {
           accountAvgViews: 0,
         },
       }),
-      20,
+      "baseline",
     );
-    const r = recs.find((x) => x.factorId === "baseline");
-    if (r) assert.match(r.message, /average views/);
+    assert.match(r.message, /average views/);
   });
 
   it("novelty=3 produces 'Bump novelty' message", () => {
-    const recs = recommend(
+    const r = rec(
       makePost({ context: { ...makePost().context, novelty: 3 } }),
-      20,
+      "novelty",
     );
-    const r = recs.find((x) => x.factorId === "novelty");
-    if (r) assert.match(r.message, /Bump novelty/);
+    assert.match(r.message, /Bump novelty/);
   });
 
   it("emotion=3 produces 'Push the emotional payoff' message", () => {
-    const recs = recommend(
+    const r = rec(
       makePost({ context: { ...makePost().context, emotion: 3 } }),
-      20,
+      "emotion",
     );
-    const r = recs.find((x) => x.factorId === "emotion");
-    if (r) assert.match(r.message, /Push the emotional payoff/);
+    assert.match(r.message, /Push the emotional payoff/);
   });
 
   it("hashtag too many: 'Trim' message", () => {
-    const recs = recommend(
+    const r = rec(
       makePost({
         content: {
           ...makePost().content,
           hashtags: ["a", "b", "c", "d", "e", "f", "g", "h"],
         },
       }),
-      20,
+      "hashtags",
     );
-    const r = recs.find((x) => x.factorId === "hashtags");
-    if (r) assert.match(r.message, /Trim/);
+    assert.match(r.message, /Trim/);
   });
 });
