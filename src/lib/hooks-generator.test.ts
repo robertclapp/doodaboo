@@ -5,6 +5,9 @@ import {
   HOOK_FAMILIES,
   variantsForPlatform,
 } from "./hooks-generator";
+import { PLATFORMS } from "./types";
+
+const ALL_PLATFORM_IDS = PLATFORMS.map((p) => p.id);
 
 describe("generateHooks", () => {
   it("returns [] for empty or whitespace-only subject", () => {
@@ -34,24 +37,14 @@ describe("generateHooks", () => {
     }
   });
 
-  it("`fitsAll` templates expand to all 8 platforms", () => {
+  it("`fitsAll` templates expand to every known platform", () => {
+    // Derive the expected set from the canonical PLATFORMS list so adding
+    // a platform doesn't require updating a hardcoded count + inline list.
     const v = generateHooks({ subject: "AI agents" });
     const fitsAll = v.filter((x) => x.template.fitsAll);
     assert.ok(fitsAll.length > 0);
     for (const x of fitsAll) {
-      assert.equal(x.fits.length, 8);
-      for (const p of [
-        "tiktok",
-        "reels",
-        "shorts",
-        "x",
-        "threads",
-        "linkedin",
-        "instagram_feed",
-        "facebook",
-      ]) {
-        assert.ok(x.fits.includes(p as any), `missing ${p} in ${x.id}`);
-      }
+      assert.deepEqual([...x.fits].sort(), [...ALL_PLATFORM_IDS].sort());
     }
   });
 

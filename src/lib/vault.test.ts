@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -18,10 +18,21 @@ import {
 } from "./vault";
 import { createTask, emptyWorkspace, WORKSPACE_VERSION } from "./mutations";
 
+// These tests pass the vault root explicitly to every vault function, so
+// they don't go through the DOODABOO_VAULT-based withTempVault helper.
+// Track each temp dir and remove them all at the end so the suite doesn't
+// leak /tmp/doodaboo-test-* directories across runs.
+const tmpRoots: string[] = [];
 async function tmpVault(): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "doodaboo-test-"));
+  tmpRoots.push(root);
   return root;
 }
+after(async () => {
+  await Promise.all(
+    tmpRoots.map((r) => fs.rm(r, { recursive: true, force: true })),
+  );
+});
 
 describe("vault", () => {
   it("init creates workspace.json + scaffolding", async () => {
@@ -434,9 +445,10 @@ describe("saveWorkspace — backup pruning", () => {
     const paths = vaultPaths(root);
     const ws = await loadWorkspace(root);
 
-    // Create 25 saves to exceed the 20-backup ceiling. The save dance
-    // names backups by ISO timestamp, so we need them to differ.
-    for (let i = 0; i < 25; i++) {
+    // 22 saves is just past the 20-backup ceiling — enough to prove
+    // pruning fired without extra disk churn. The save dance names backups
+    // by ISO timestamp, so stagger them so the filenames differ.
+    for (let i = 0; i < 22; i++) {
       await new Promise((r) => setTimeout(r, 2));
       await saveWorkspace(ws, root);
     }

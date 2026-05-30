@@ -92,12 +92,8 @@ describe("scoreIntrinsic", () => {
     );
   });
 
-  it("weights sum to ~1 per platform (no factor inflates the score)", () => {
-    const s = scoreIntrinsic(makePost());
-    const total = s.factors.reduce((sum, f) => sum + f.weight, 0);
-    // Allow tiny float drift; weights are normalized.
-    assert.ok(Math.abs(total - 1) < 0.001, `weights sum = ${total}`);
-  });
+  // (Per-platform weight-sum normalization is covered exhaustively by the
+  // "platformProfile + per-platform scoring" loop below.)
 
   it("confidence is moderate without engagement data", () => {
     const s = scoreIntrinsic(makePost());

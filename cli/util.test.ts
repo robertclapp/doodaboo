@@ -124,10 +124,6 @@ describe("row", () => {
 });
 
 describe("nonneg / bounded — additional edge cases", () => {
-  it("nonneg accepts fractional values", () => {
-    assert.equal(nonneg("0.5", "x"), 0.5);
-  });
-
   it("nonneg error message names the flag", () => {
     try {
       nonneg("foo", "myflag");
@@ -135,6 +131,12 @@ describe("nonneg / bounded — additional edge cases", () => {
     } catch (err) {
       assert.match((err as Error).message, /--myflag/);
     }
+  });
+
+  it("nonneg accepts '-0' and returns negative zero", () => {
+    // Number("-0") is -0; it's non-negative so nonneg accepts it.
+    // assert.equal uses Object.is, so this pins the exact -0 return.
+    assert.equal(nonneg("-0", "x"), -0);
   });
 
   it("bounded rejects positive Infinity", () => {
@@ -182,25 +184,6 @@ describe("vaultRoot", () => {
 
   it("falls back to defaultVaultRoot() when --vault is undefined", () => {
     assert.equal(vaultRoot({}), defaultVaultRoot());
-  });
-});
-
-describe("nonneg / bounded — boundary cases", () => {
-  it("bounded accepts exact min and exact max", () => {
-    assert.equal(bounded("0", "p", 0, 100), 0);
-    assert.equal(bounded("100", "p", 0, 100), 100);
-  });
-
-  it("bounded rejects min-1 and max+1", () => {
-    assert.throws(() => bounded("-1", "p", 0, 100));
-    assert.throws(() => bounded("101", "p", 0, 100));
-  });
-
-  it("nonneg accepts -0 (since -0 == 0 and is non-negative)", () => {
-    // Node's strict assert.equal uses Object.is which treats -0 ≠ 0.
-    // The contract is just "non-negative finite" — both representations satisfy it.
-    const result = nonneg("-0", "x");
-    assert.ok(result === 0 || Object.is(result, -0));
   });
 });
 

@@ -159,6 +159,18 @@ describe("dueStatus", () => {
     const inMonth = new Date(midnight + 30 * DAY).toISOString();
     assert.equal(dueStatus(inMonth, now), "later");
   });
+
+  // Inclusive lower edge and exclusive upper edge of the "today" window.
+  it("classifies the exact start-of-today as 'today'", () => {
+    assert.equal(dueStatus(new Date(midnight).toISOString(), now), "today");
+  });
+
+  it("classifies the last millisecond of today as 'today'", () => {
+    assert.equal(
+      dueStatus(new Date(midnight + DAY - 1).toISOString(), now),
+      "today",
+    );
+  });
 });
 
 describe("localDateInputToIso / isoToLocalDateInput", () => {
@@ -210,25 +222,7 @@ describe("utils boundary cases", () => {
     assert.match(timeAgo(t), /^0s$/);
   });
 
-  it("dueStatus: the exact start-of-today boundary is 'today'", () => {
-    // Pin now; derive the local-midnight the impl uses, then probe the
-    // inclusive lower edge of the today window.
-    const now = Date.parse("2026-05-30T12:00:00.000Z");
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    assert.equal(dueStatus(new Date(start.getTime()).toISOString(), now), "today");
-  });
-
-  it("dueStatus: the last millisecond of today is still 'today'", () => {
-    const now = Date.parse("2026-05-30T12:00:00.000Z");
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    // todayEnd is exclusive, so the last in-window instant is end-1ms.
-    const lastMs = start.getTime() + 24 * 3600_000 - 1;
-    assert.equal(dueStatus(new Date(lastMs).toISOString(), now), "today");
-  });
-
-  it("dueStatus: returns 'none' for empty string", () => {
+  it("dueStatus: returns 'none' for empty string (distinct from undefined)", () => {
     assert.equal(dueStatus("", Date.now()), "none");
   });
 

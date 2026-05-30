@@ -33,6 +33,12 @@ function ctx<T extends Record<string, string>>(params: T) {
   return { params: Promise.resolve(params) };
 }
 
+/** Id of the first seeded post, via the list route. */
+async function firstPostId(): Promise<string> {
+  const res = await postsRoute.GET(new Request("http://t/api/posts"));
+  return ((await res.json()) as { id: string }[])[0].id;
+}
+
 let vault: TempVaultEnv;
 let vaultRoot: string;
 
@@ -187,12 +193,6 @@ describe("/api/posts", () => {
 // ── /api/posts/[id] ────────────────────────────────────────────────────────
 
 describe("/api/posts/[id]", () => {
-  async function firstPostId(): Promise<string> {
-    const res = await postsRoute.GET(new Request("http://t/api/posts"));
-    const body = (await res.json()) as any[];
-    return body[0].id;
-  }
-
   it("GET returns the post", async () => {
     const id = await firstPostId();
     const res = await postIdRoute.GET(new Request("http://t/"), ctx({ postId: id }));
@@ -271,11 +271,6 @@ describe("/api/posts/[id]", () => {
 // ── /api/posts/[id]/snapshots ──────────────────────────────────────────────
 
 describe("/api/posts/[id]/snapshots", () => {
-  async function firstPostId(): Promise<string> {
-    const res = await postsRoute.GET(new Request("http://t/api/posts"));
-    return ((await res.json()) as any[])[0].id;
-  }
-
   it("GET returns the post's snapshots", async () => {
     const id = await firstPostId();
     const res = await postSnapshotsRoute.GET(
@@ -359,8 +354,7 @@ describe("/api/posts/[id]/snapshots", () => {
 
 describe("/api/posts/[id]/score", () => {
   it("returns intrinsic, live, projection, recommendations", async () => {
-    const list = await postsRoute.GET(new Request("http://t/api/posts"));
-    const id = ((await list.json()) as any[])[0].id;
+    const id = await firstPostId();
     const res = await postScoreRoute.GET(
       new Request("http://t/"),
       ctx({ postId: id }),
@@ -398,8 +392,7 @@ describe("/api/posts/[id]/score", () => {
 
     // Suppress the expected warning + plugin log.
     await silenceConsole(["warn", "log"], async () => {
-      const list = await postsRoute.GET(new Request("http://t/api/posts"));
-      const id = ((await list.json()) as any[])[0].id;
+      const id = await firstPostId();
       const res = await postScoreRoute.GET(
         new Request("http://t/"),
         ctx({ postId: id }),
@@ -563,8 +556,7 @@ describe("/api/playbooks", () => {
   });
 
   it("POST /:id applies a playbook to a post", async () => {
-    const list = await postsRoute.GET(new Request("http://t/api/posts"));
-    const id = ((await list.json()) as any[])[0].id;
+    const id = await firstPostId();
     const req = new Request("http://t/", {
       method: "POST",
       body: JSON.stringify({ postId: id }),
