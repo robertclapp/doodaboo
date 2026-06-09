@@ -13,7 +13,7 @@ import {
   createTempVaultEnv,
   silenceConsole,
   TempVaultEnv,
-} from "@/lib/test-utils";
+} from "@/lib/__tests__/test-utils";
 
 // Use cwd-relative imports through @/ alias so tsx + tsconfig paths apply.
 import * as healthRoute from "./health/route";

@@ -25,13 +25,45 @@ interface RunResult {
   stderr: string;
 }
 
+// Forward only the vars the spawned `tsx` / Node / npx actually need to
+// start. We deliberately do NOT inherit the full parent env:
+//   - DOODABOO_VAULT inherited from the developer's shell would silently
+//     target their real vault if a future test omitted both --vault and a
+//     positional path.
+//   - Secrets like GITHUB_TOKEN / OPENAI_API_KEY etc. have no business in
+//     a CLI test child and shouldn't be exposed to a crash dump or stderr.
+const ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "NODE_PATH",
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  "SHELL",
+  "USER",
+  // npm / npx caches and prefixes — needed for `npx --no-install tsx`.
+  "npm_config_cache",
+  "npm_config_prefix",
+  "NPM_CONFIG_CACHE",
+  "NPM_CONFIG_PREFIX",
+] as const;
+
+function safeEnv(extra: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of ENV_ALLOWLIST) {
+    const v = process.env[k];
+    if (v !== undefined) out[k] = v;
+  }
+  return { ...out, ...extra };
+}
+
 function run(args: string[], extraEnv: Record<string, string> = {}): RunResult {
   const res = spawnSync(
     "npx",
     ["--no-install", "tsx", CLI, ...args],
     {
       cwd: REPO,
-      env: { ...process.env, ...extraEnv },
+      env: safeEnv(extraEnv),
       encoding: "utf-8",
     },
   );
@@ -292,6 +324,17 @@ describe("doodaboo export --markdown (safeFilename traversal defense)", () => {
     await fs.writeFile(workspaceFile, JSON.stringify(state, null, 2), "utf-8");
 
     const target = path.join(vaultRoot, "out");
+
+    // Sentinel + parent-tree snapshot, so we catch a regression that
+    // escapes upward by one level (e.g. into vaultRoot/ siblings of out/)
+    // without going all the way to /etc/. Walking only `target` would
+    // miss those, leaving the test green on a real traversal regression.
+    const sentinelDir = path.join(vaultRoot, "sentinel");
+    await fs.mkdir(sentinelDir, { recursive: true });
+    const sentinelPath = path.join(sentinelDir, "untouched");
+    await fs.writeFile(sentinelPath, "do not modify", "utf-8");
+    const beforeSiblings = (await fs.readdir(vaultRoot)).sort();
+
     const r = run([
       "export",
       "--markdown",
@@ -301,7 +344,6 @@ describe("doodaboo export --markdown (safeFilename traversal defense)", () => {
     ]);
     assert.equal(r.status, 0);
 
-    // Verify every written file is inside the target dir.
     async function walk(dir: string): Promise<string[]> {
       const entries = await fs.readdir(dir, { withFileTypes: true });
       const out: string[] = [];
@@ -312,15 +354,30 @@ describe("doodaboo export --markdown (safeFilename traversal defense)", () => {
       }
       return out;
     }
+
+    // 1. Every file inside `target` is genuinely inside target — no
+    //    `../` escapes that resolve back inside it via a circuitous path.
     const written = await walk(target);
     for (const f of written) {
       assert.ok(
         path.resolve(f).startsWith(path.resolve(target) + path.sep),
-        `path traversal: ${f}`,
+        `path traversal inside target: ${f}`,
       );
     }
 
-    // Confirm sensitive paths were NOT touched.
+    // 2. The vault root's direct child set is exactly what it was before
+    //    export (modulo `out/` itself), so no new sibling directories
+    //    were created by a one-level upward escape.
+    const afterSiblings = (await fs.readdir(vaultRoot)).sort();
+    const newSiblings = afterSiblings.filter(
+      (n) => !beforeSiblings.includes(n) && n !== "out",
+    );
+    assert.deepEqual(newSiblings, [], "unexpected siblings of out/ appeared");
+
+    // 3. The sentinel outside target is byte-identical — no overwrite.
+    assert.equal(await fs.readFile(sentinelPath, "utf-8"), "do not modify");
+
+    // 4. Belt-and-suspenders: the canonical exploit target wasn't touched.
     await assert.rejects(fs.access("/etc/passwd.md"));
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createTauriStorage, isTauri } from "./tauri-storage";
-import { silenceConsole } from "./test-utils";
+import { silenceConsole } from "./__tests__/test-utils";
 
 describe("isTauri", () => {
   it("returns false when window is undefined (SSR)", () => {

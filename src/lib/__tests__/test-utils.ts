@@ -1,6 +1,11 @@
 /**
  * Shared test helpers.
  *
+ * Lives under `__tests__/` so that an accidental `import { ... } from
+ * "@/lib/test-utils"` from production code (a typo, an autocomplete miss)
+ * fails to resolve rather than silently pulling Node-only modules
+ * (`fs`, `os`, `path`, `./vault`) into the client bundle.
+ *
  * These centralize three patterns that were previously copy-pasted across
  * the test suite — each one a place where a missed restore would leak
  * state into sibling tests (the hardest class of flake to diagnose):
@@ -12,11 +17,20 @@
  *
  * Importing this module has no side effects; it is only pulled in by
  * `*.test.ts` files, never by application code.
+ *
+ * Concurrency: these helpers mutate `process.env.DOODABOO_VAULT` and
+ * `console.*`, both process-wide. They are NOT safe to call concurrently
+ * from within a single process — two overlapping `createTempVaultEnv`
+ * calls would interleave their save/restore pairs and corrupt the env
+ * (the second caller captures the first's mutated value as "previous").
+ * node:test runs tests within a file sequentially by default, which
+ * matches the assumption; do not enable subtest concurrency without
+ * replacing this with a stack/lock.
  */
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { initVault } from "./vault";
+import { initVault } from "../vault";
 
 type ConsoleMethod = "log" | "warn" | "error";
 

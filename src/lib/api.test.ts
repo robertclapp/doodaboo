@@ -11,7 +11,7 @@ import {
   safeJson,
 } from "./api";
 import { createTask } from "./mutations";
-import { silenceConsole, withTempVault } from "./test-utils";
+import { silenceConsole, withTempVault } from "./__tests__/test-utils";
 
 describe("json", () => {
   it("returns 200 with no-store cache header by default", async () => {
