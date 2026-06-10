@@ -1,0 +1,63 @@
+import { test, expect } from "@playwright/test";
+import { resetWorkspace } from "./helpers";
+
+test.describe("Playbooks", () => {
+  test.beforeEach(async ({ page }) => {
+    await resetWorkspace(page);
+  });
+
+  test("library shows seed playbooks and filters by category", async ({
+    page,
+  }) => {
+    await page.goto("/playbooks");
+    await expect(
+      page.getByRole("main").getByText(/3-second hook/i),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("main").getByText(/X funnel/i),
+    ).toBeVisible();
+
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: /^thread$/i })
+      .click();
+    await expect(
+      page.getByRole("main").getByText(/X funnel/i),
+    ).toBeVisible();
+  });
+
+  test("playbook detail surfaces hook + caption patterns", async ({
+    page,
+  }) => {
+    await page.goto("/playbooks/pb_3s_hook");
+    await expect(
+      page.getByRole("main").getByText(/Hook pattern/i),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("main").getByText(/Caption pattern/i),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("main").getByText(/Configuration/i),
+    ).toBeVisible();
+  });
+
+  test("apply-playbook modal previews score before/after", async ({
+    page,
+  }) => {
+    await page.goto("/posts/po_brutalist_drop");
+    await page
+      .getByRole("button", { name: /Apply playbook|Playbook · /i })
+      .first()
+      .click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText(/Apply a playbook/i)).toBeVisible();
+
+    await dialog.getByRole("button", { name: /3-second hook/i }).click();
+    await expect(dialog.getByText(/Preview · 3-second hook/i)).toBeVisible();
+    // Stat labels are exact-match strings; the same words appear in the
+    // playbook description and notes blocks below, so a substring match
+    // would resolve multiple elements.
+    await expect(dialog.getByText("Before", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("After", { exact: true })).toBeVisible();
+  });
+});
