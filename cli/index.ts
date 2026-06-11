@@ -7,6 +7,7 @@
  */
 import { runInit } from "./commands/init.js";
 import { runStatus } from "./commands/status.js";
+import { runDash } from "./commands/dash.js";
 import { runProject } from "./commands/project.js";
 import { runTask } from "./commands/task.js";
 import { runPost } from "./commands/post.js";
@@ -20,6 +21,7 @@ import { runPlugin } from "./commands/plugin.js";
 const COMMANDS: Record<string, (argv: string[]) => Promise<number>> = {
   init: runInit,
   status: runStatus,
+  dash: runDash,
   project: runProject,
   task: runTask,
   post: runPost,
@@ -39,6 +41,7 @@ Usage:
 Commands:
   init [path]                  Create a new vault (default ~/.doodaboo).
   status                       Print a workspace summary.
+  dash                         One-screen daily-driver dashboard.
   project <list|new|show>      Manage projects.
   task <list|new|set|show>     Manage tasks.
   post <list|new|score|snap>   Manage posts and engagement snapshots.

@@ -49,6 +49,7 @@ successful save. Recover by copying any backup back to `workspace.json`.
 ```text
 doodaboo init [path] [--force]
 doodaboo status [--json]
+doodaboo dash [--limit=5] [--no-recommendations] [--json]
 
 doodaboo project list [--json]
 doodaboo project new --key=KEY --name="…" [--description=…] [--accent=#hex]
