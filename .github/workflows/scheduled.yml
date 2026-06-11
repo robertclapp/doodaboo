@@ -1,0 +1,212 @@
+name: Scheduled
+
+on:
+  schedule:
+    # 06:00 UTC daily verify — catches dep drift, time-sensitive
+    # tests, and broken external Playwright browser downloads.
+    - cron: "0 6 * * *"
+    # 09:00 UTC Monday weekly Tauri-build sanity check.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Which job to run"
+        required: true
+        default: "verify"
+        type: choice
+        options:
+          - verify
+          - tauri-sanity
+          - audit
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  verify:
+    name: Nightly verify
+    if: ${{ github.event.schedule == '0 6 * * *' || inputs.job == 'verify' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Verify (typecheck + lint + unit tests)
+        run: npm run verify
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Build
+        run: npm run build
+
+      - name: E2E
+        env:
+          CI: "true"
+        run: npm run e2e
+
+      - name: Open issue on failure
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `[ops] Nightly verify failed ${new Date().toISOString().slice(0, 10)}`;
+            const body = [
+              `The scheduled nightly verify run failed.`,
+              ``,
+              `Run: ${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+              ``,
+              `Common causes:`,
+              `- An npm dependency published a breaking change`,
+              `- Playwright pinned a new chromium build the cache doesn't have`,
+              `- A time-sensitive seed/test that didn't expect today's date`,
+              `- A flaky E2E that needs a stronger selector`,
+            ].join("\n");
+            // Avoid spamming: reuse an open issue with the same title.
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "ops:nightly",
+            });
+            const existing = open.find((i) => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Failed again. Run: ${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["ops:nightly"],
+              });
+            }
+
+  tauri-sanity:
+    name: Tauri ${{ matrix.platform.label }} build
+    if: ${{ github.event.schedule == '0 9 * * 1' || inputs.job == 'tauri-sanity' }}
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - runner: ubuntu-22.04
+            label: Linux
+            target: x86_64-unknown-linux-gnu
+          - runner: macos-14
+            label: macOS
+            target: aarch64-apple-darwin
+          - runner: windows-latest
+            label: Windows
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          # src-tauri/Cargo.lock is gitignored, so hashFiles wouldn't see
+          # it; if we ever commit it we can add it back. Hash the npm
+          # lockfile too so a JS-only dep change still invalidates the
+          # Rust build's incremental target dir.
+          key: tauri-${{ matrix.platform.target }}-${{ hashFiles('src-tauri/Cargo.toml', 'package-lock.json') }}
+
+      - name: Install Linux system deps
+        if: matrix.platform.runner == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libsoup-3.0-dev \
+            libdbus-1-dev
+
+      - name: Install JS deps
+        run: npm ci
+
+      - name: cargo check (Tauri crate compiles)
+        working-directory: src-tauri
+        run: cargo check --target ${{ matrix.platform.target }}
+
+      - name: Open issue on failure
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        env:
+          PLATFORM_LABEL: ${{ matrix.platform.label }}
+        with:
+          # Read the platform label from the env block instead of
+          # ${{ ... }}-substituting it into the JS source. A future matrix
+          # value containing a backtick or ${ would otherwise inject JS
+          # into a step that has issues:write.
+          script: |
+            const label = process.env.PLATFORM_LABEL;
+            const today = new Date().toISOString().slice(0, 10);
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[ops] Weekly Tauri ${label} sanity build failed ${today}`,
+              body: `Tauri/cargo check failed for ${label}. Run: ${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+              labels: ["ops:tauri"],
+            });
+
+  audit:
+    name: npm audit
+    if: ${{ inputs.job == 'audit' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Audit
+        run: npm audit --omit=dev --audit-level=moderate
