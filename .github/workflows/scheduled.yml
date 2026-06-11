@@ -145,7 +145,11 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: tauri-${{ matrix.platform.target }}-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml') }}
+          # src-tauri/Cargo.lock is gitignored, so hashFiles wouldn't see
+          # it; if we ever commit it we can add it back. Hash the npm
+          # lockfile too so a JS-only dep change still invalidates the
+          # Rust build's incremental target dir.
+          key: tauri-${{ matrix.platform.target }}-${{ hashFiles('src-tauri/Cargo.toml', 'package-lock.json') }}
 
       - name: Install Linux system deps
         if: matrix.platform.runner == 'ubuntu-22.04'
@@ -169,13 +173,21 @@ jobs:
       - name: Open issue on failure
         if: failure() && github.event_name == 'schedule'
         uses: actions/github-script@v7
+        env:
+          PLATFORM_LABEL: ${{ matrix.platform.label }}
         with:
+          # Read the platform label from the env block instead of
+          # ${{ ... }}-substituting it into the JS source. A future matrix
+          # value containing a backtick or ${ would otherwise inject JS
+          # into a step that has issues:write.
           script: |
+            const label = process.env.PLATFORM_LABEL;
+            const today = new Date().toISOString().slice(0, 10);
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `[ops] Weekly Tauri ${{ matrix.platform.label }} sanity build failed ${new Date().toISOString().slice(0, 10)}`,
-              body: `Tauri/cargo check failed for ${{ matrix.platform.label }}. Run: ${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+              title: `[ops] Weekly Tauri ${label} sanity build failed ${today}`,
+              body: `Tauri/cargo check failed for ${label}. Run: ${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
               labels: ["ops:tauri"],
             });
 

@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -12,11 +12,21 @@ import {
 } from "./report";
 import { initVault, vaultPaths } from "../../src/lib/vault";
 
+// Each tmpVault() creates a fresh /tmp/doodaboo-report-* directory.
+// Track them all and remove at suite end so long-lived runners (CI,
+// dev laptops) don't accumulate orphan vaults.
+const tmpRoots: string[] = [];
 async function tmpVault(): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "doodaboo-report-"));
+  tmpRoots.push(root);
   await initVault(root, { force: true });
   return root;
 }
+after(async () => {
+  await Promise.all(
+    tmpRoots.map((r) => fs.rm(r, { recursive: true, force: true })),
+  );
+});
 
 /**
  * Capture stdout for the duration of `fn`. `runReport` writes status
@@ -108,7 +118,8 @@ describe("runReport — file output", () => {
     for (const heading of [
       "## Headline",
       "## Top performers",
-      "## Biggest movers",
+      "## Biggest gains",
+      "## Biggest regressions",
       "## By platform",
       "## Factor weakness",
       "## Playbook coverage",
@@ -160,7 +171,9 @@ describe("runReport — file output", () => {
     assert.equal(typeof parsed.windowEnd, "string");
     assert.equal(typeof parsed.windowDays, "number");
     assert.ok(Array.isArray(parsed.topPerformers));
-    assert.ok(Array.isArray(parsed.biggestMovers));
+    assert.ok(parsed.biggestMovers && typeof parsed.biggestMovers === "object");
+    assert.ok(Array.isArray(parsed.biggestMovers.gains));
+    assert.ok(Array.isArray(parsed.biggestMovers.regressions));
     assert.ok(Array.isArray(parsed.byPlatform));
     assert.ok(Array.isArray(parsed.factorWeakness));
     assert.ok(Array.isArray(parsed.playbookCoverage));
@@ -208,23 +221,26 @@ describe("runReport — window flags", () => {
 });
 
 describe("biggest movers — gracefully handles single-snapshot posts", () => {
-  it("does not crash and produces a stable structure", async () => {
+  it("does not crash and zero-delta posts are filtered out", async () => {
     const root = await tmpVault();
-    // Tweak the saved workspace: leave a post with exactly one
-    // snapshot, then re-save. We use --json so we can introspect the
-    // structured output directly.
+    // Trim every post in the seed to at most one snapshot — this forces
+    // every post's mover delta to 0 (baseline == current), so the gains
+    // and regressions tables must come back EMPTY (the previous
+    // assertion "no row has delta=0" passed vacuously on an empty
+    // array even if the filter was broken).
     const wsFile = path.join(root, "workspace.json");
     const raw = JSON.parse(await fs.readFile(wsFile, "utf-8"));
-    // Find any post with snapshots, drop all but the first.
-    let trimmed = false;
+    let trimmedCount = 0;
     for (const p of raw.posts as Array<{ snapshots: unknown[] }>) {
       if (Array.isArray(p.snapshots) && p.snapshots.length > 1) {
         p.snapshots = [p.snapshots[0]];
-        trimmed = true;
-        break;
+        trimmedCount += 1;
+      } else if (Array.isArray(p.snapshots) && p.snapshots.length === 0) {
+        // Posts with zero snapshots are already excluded by the
+        // mover builder — leave them alone.
       }
     }
-    assert.ok(trimmed, "seed should contain at least one multi-snapshot post");
+    assert.ok(trimmedCount > 0, "seed must contain a multi-snapshot post");
     await fs.writeFile(wsFile, JSON.stringify(raw, null, 2), "utf-8");
 
     const { code, out } = await captureStdout(() =>
@@ -238,12 +254,37 @@ describe("biggest movers — gracefully handles single-snapshot posts", () => {
     );
     assert.equal(code, 0);
     const parsed = JSON.parse(out) as ReportData;
-    // The mover list should be an array (possibly empty) — never null
-    // or undefined, and never include a row whose delta is exactly 0.
-    assert.ok(Array.isArray(parsed.biggestMovers));
-    for (const m of parsed.biggestMovers) {
-      assert.notEqual(m.delta, 0);
-    }
+    assert.ok(
+      parsed.biggestMovers && typeof parsed.biggestMovers === "object",
+    );
+    // Every single-snapshot post collapses to delta=0 and is filtered
+    // out, so BOTH gains and regressions must be empty. Asserting the
+    // empty-length pins the "filter zero deltas" contract — the
+    // previous "for each row, delta !== 0" check passed even when the
+    // arrays were empty.
+    assert.equal(parsed.biggestMovers.gains.length, 0);
+    assert.equal(parsed.biggestMovers.regressions.length, 0);
+  });
+});
+
+describe("runReport — --help short-circuit", () => {
+  it("shows help without touching the vault", async () => {
+    // Deliberately bogus vault path; --help must short-circuit before
+    // loadWorkspace runs, so this should still succeed.
+    const { code, out } = await captureStdout(() =>
+      runReport([
+        "--help",
+        "--vault",
+        "/this/path/does/not/exist/report",
+      ]),
+    );
+    assert.equal(code, 0);
+    assert.match(out, /doodaboo report/);
+    assert.match(out, /--window/);
+    assert.match(out, /--since/);
+    assert.match(out, /--out/);
+    assert.match(out, /--stdout/);
+    assert.match(out, /--json/);
   });
 });
 
@@ -266,7 +307,7 @@ describe("renderMarkdown — empty workspace", () => {
         hotPlusCount: 0,
       },
       topPerformers: [],
-      biggestMovers: [],
+      biggestMovers: { gains: [], regressions: [] },
       byPlatform: [],
       factorWeakness: [],
       playbookCoverage: [],

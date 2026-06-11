@@ -79,7 +79,7 @@ export async function runDash(argv: string[]): Promise<number> {
   const needsSnapshots = buildNeedsSnapshots(state.posts, limit, now);
   const recommendations = skipRecommendations
     ? []
-    : buildRecommendations(state.posts, 3);
+    : buildRecommendations(state.posts, limit);
   const overdue = buildOverdue(state.tasks, state.projects, limit, now);
   const openTotal = state.tasks.filter(
     (t) => t.status !== "done" && t.status !== "cancelled",
@@ -225,10 +225,21 @@ function buildMyDay(
 
 function buildHotPosts(posts: Post[], limit: number): HotPostRow[] {
   const live = posts.filter((p) => LIVE_POST_STATUSES.has(p.status));
-  const scored = live.map((p) => {
-    const score = scoreLive(p) ?? scoreIntrinsic(p);
-    return { post: p, score };
-  });
+  const scored = live
+    .map((p) => {
+      // Defensive: a single malformed post shouldn't kill the whole dash.
+      // Mirror buildRecommendations' try/catch so the invariant holds.
+      try {
+        const score = scoreLive(p) ?? scoreIntrinsic(p);
+        return { post: p, score };
+      } catch {
+        return undefined;
+      }
+    })
+    .filter(
+      (r): r is { post: Post; score: ReturnType<typeof scoreIntrinsic> } =>
+        r !== undefined,
+    );
   scored.sort((a, b) => b.score.value - a.score.value);
   return scored.slice(0, limit).map(({ post, score }) => ({
     id: post.id,
@@ -247,7 +258,10 @@ function buildNeedsSnapshots(
   now: number,
 ): NeedsSnapshotRow[] {
   const candidates = posts
-    .filter((p) => p.status === "live")
+    // "analyzing" posts have the same need-a-snapshot pressure as
+    // "live" — every other live-section helper in this file uses
+    // LIVE_POST_STATUSES, so match that contract here.
+    .filter((p) => LIVE_POST_STATUSES.has(p.status))
     .map((p) => {
       const latest = latestSnapshot(p);
       const lastAt = latest ? new Date(latest.capturedAt).getTime() : undefined;
@@ -465,10 +479,11 @@ async function readLastUpdate(root: string): Promise<string | undefined> {
 
 function latestSnapshot(post: Post) {
   if (post.snapshots.length === 0) return undefined;
-  return [...post.snapshots].sort(
-    (a, b) =>
-      new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime(),
-  )[post.snapshots.length - 1];
+  // Sort by atMinutes (the post-launch offset) to match what scoreLive
+  // and the rest of the scoring engine treat as "latest". Sorting by
+  // capturedAt instead would disagree with the displayed score when a
+  // snapshot was backfilled out of chronological order.
+  return [...post.snapshots].sort((a, b) => a.atMinutes - b.atMinutes).slice(-1)[0];
 }
 
 function priorityIcon(p: Priority): string {
@@ -493,12 +508,23 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 function dueRelative(iso: string | undefined, now: number): string {
   if (!iso) return "—";
   const due = new Date(iso).getTime();
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
-  const todayStart = startOfToday.getTime();
-  const dueStart = new Date(due);
-  dueStart.setHours(0, 0, 0, 0);
-  const days = Math.round((dueStart.getTime() - todayStart) / DAY_MS);
+  if (!Number.isFinite(due)) return "—";
+  // Anchor "today" in UTC to match the stored dueDate's parsing — the
+  // vault writes Z-suffixed ISO timestamps, so comparing against a
+  // local-midnight boundary would off-by-one for users east/west of
+  // UTC near midnight.
+  const todayStart = Date.UTC(
+    new Date(now).getUTCFullYear(),
+    new Date(now).getUTCMonth(),
+    new Date(now).getUTCDate(),
+  );
+  const dueDate = new Date(due);
+  const dueStart = Date.UTC(
+    dueDate.getUTCFullYear(),
+    dueDate.getUTCMonth(),
+    dueDate.getUTCDate(),
+  );
+  const days = Math.round((dueStart - todayStart) / DAY_MS);
   if (days === 0) return "today";
   if (days > 0) return `+${days}d`;
   return `overdue ${-days}d`;

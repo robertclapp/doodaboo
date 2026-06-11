@@ -35,6 +35,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const REPORT_VERSION = "1";
 
 export async function runReport(argv: string[]): Promise<number> {
+  // `--help` short-circuits before parseArgs to match the rest of the
+  // CLI; util.parseArgs runs in strict mode and would otherwise throw
+  // "Unknown option '--help'" because we don't declare a help flag.
+  if (argv.includes("--help") || argv.includes("-h")) {
+    process.stdout.write(REPORT_HELP);
+    return 0;
+  }
   const { values } = parseArgs<{
     window?: string;
     since?: string;
@@ -83,13 +90,41 @@ export async function runReport(argv: string[]): Promise<number> {
         `${report.weekId}.md`,
       );
   await fs.mkdir(path.dirname(target), { recursive: true });
-  // Atomic write — `.tmp` then rename, mirroring vault.ts's saveWorkspace.
-  const tmp = `${target}.tmp-${process.pid}`;
+  // Atomic write — `.tmp` then rename, mirroring vault.ts. The tmp
+  // suffix mixes pid, a high-res timestamp, and a small random tail so
+  // two concurrent runReport calls in the same Node process (e.g. a
+  // test harness running multiple windows in parallel) can't collide
+  // on the same path. On any error after the write, we best-effort
+  // unlink the tmp so a failed rename doesn't leave orphan files.
+  const tmp = `${target}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   await fs.writeFile(tmp, markdown, "utf-8");
-  await fs.rename(tmp, target);
+  try {
+    await fs.rename(tmp, target);
+  } catch (err) {
+    await fs.unlink(tmp).catch(() => undefined);
+    throw err;
+  }
   process.stdout.write(`Report written to ${target}\n`);
   return 0;
 }
+
+const REPORT_HELP = `doodaboo report — weekly markdown report
+
+Usage:
+  doodaboo report [--window=7d] [--since=ISO] [--out=PATH] [--stdout] [--json]
+
+Options:
+  --window=<N>d   Length of the window (7d default, also 14d/30d/90d).
+  --since=ISO     Explicit start instant (e.g. 2026-03-01T00:00:00Z).
+                  Overrides --window. ISO date-only strings are parsed as
+                  UTC midnight for stability across timezones.
+  --out=<path>    Write to this file instead of
+                  <vault>/exports/reports/<weekId>.md.
+  --stdout        Print markdown to stdout instead of writing a file.
+  --json          Emit the structured report data as JSON.
+  --vault=<path>  Override the vault root.
+  --help, -h      Show this help.
+`;
 
 // ── Window parsing ──────────────────────────────────────────────────────────
 
@@ -111,7 +146,15 @@ export function parseWindow(raw: string): number {
 }
 
 function parseSinceFlag(raw: string): Date {
-  const d = new Date(raw);
+  // `new Date("2026-03-01")` is UTC midnight per ECMA-262 but
+  // `new Date("2026-03-01T00:00:00")` (no Z) is *local* midnight. We
+  // normalise date-only strings to UTC so the same user typing the
+  // same flag gets the same window regardless of timezone.
+  const trimmed = raw.trim();
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  const d = dateOnly
+    ? new Date(`${trimmed}T00:00:00.000Z`)
+    : new Date(trimmed);
   if (Number.isNaN(d.getTime())) {
     fail(`--since must be a parseable ISO date; got "${raw}".`);
   }
@@ -162,7 +205,7 @@ export interface ReportData {
   projectCounts: { total: number; active: number };
   headline: HeadlineData;
   topPerformers: TopPerformerRow[];
-  biggestMovers: MoverRow[];
+  biggestMovers: { gains: MoverRow[]; regressions: MoverRow[] };
   byPlatform: PlatformRow[];
   factorWeakness: FactorRow[];
   playbookCoverage: PlaybookRow[];
@@ -232,6 +275,9 @@ interface ScheduleRow {
   title: string;
   platform: Platform;
   scheduledAt: string;
+  // True when the scheduledAt is in the past — the post was supposed
+  // to be published already but the status is still "scheduled".
+  overdue: boolean;
 }
 
 interface ProjectPulseRow {
@@ -247,6 +293,10 @@ interface ProjectPulseRow {
 
 // ── Build ───────────────────────────────────────────────────────────────────
 
+// Posts that "live for recommendations". Mirrors dash.ts so dash and
+// report agree on which posts deserve scoring attention.
+const LIVE_POST_STATUSES = new Set<Post["status"]>(["live", "analyzing"]);
+
 function buildReport(
   state: WorkspaceState,
   root: string,
@@ -259,14 +309,23 @@ function buildReport(
   const postsInWindow = state.posts.filter((p) =>
     postIsInWindow(p, start, end),
   );
+  // Disjoint prior cohort: posts that had activity in the prior window
+  // *and not* in the current one. Without the second guard, long-lived
+  // posts contribute the same scoreFor() to both averages and the
+  // headline "Δ vs prior" silently biases toward zero.
   const priorStart = new Date(start.getTime() - windowMs);
-  const postsPrior = state.posts.filter((p) =>
-    postIsInWindow(p, priorStart, start),
+  const postsPrior = state.posts.filter(
+    (p) =>
+      postIsInWindow(p, priorStart, start) && !postIsInWindow(p, start, end),
   );
 
   return {
     vault: root,
-    weekId: isoWeekId(end),
+    // Name the file after the ISO week that the *content* covers
+    // (anchored on `start`), not the week the report happens to be
+    // generated in. A Monday-morning run for last week would otherwise
+    // write 2026-W24.md with 2026-W23's data.
+    weekId: isoWeekId(start),
     windowStart: start.toISOString(),
     windowEnd: end.toISOString(),
     windowDays,
@@ -313,7 +372,11 @@ function postIsInWindow(post: Post, start: Date, end: Date): boolean {
     if (!iso) continue;
     const t = Date.parse(iso);
     if (!Number.isFinite(t)) continue;
-    if (t >= start.getTime() && t < end.getTime()) return true;
+    // Inclusive at end: a snapshot captured at exactly `end` (which is
+    // `now`) should land inside the window, not excluded by a strict
+    // less-than that the frontmatter's `generatedAt` then claims it
+    // was included in.
+    if (t >= start.getTime() && t <= end.getTime()) return true;
   }
   return false;
 }
@@ -394,9 +457,12 @@ function buildTopPerformers(inWindow: Post[]): TopPerformerRow[] {
   if (scored.length === 0) return [];
 
   // Top decile: posts whose score is at or above the 90th percentile.
-  // The slice(0, 10) cap handles tiny windows where every post is "top
-  // decile" against itself.
-  const cutoffIdx = Math.max(0, Math.floor(scored.length * 0.9) - 1);
+  // `scored` is sorted *descending*, so the 90th-percentile cutoff is
+  // the score at the boundary of the top ~10% of indices —
+  // `ceil(n * 0.1) - 1`, not `floor(n * 0.9) - 1` (which would pick
+  // the bottom 10% boundary). The slice(0, 10) cap handles tiny
+  // windows where every post is "top decile" against itself.
+  const cutoffIdx = Math.max(0, Math.ceil(scored.length * 0.1) - 1);
   const cutoffScore = scored[cutoffIdx].score;
   const decile = scored.filter((x) => x.score >= cutoffScore);
   const taken = decile.slice(0, 10);
@@ -424,32 +490,45 @@ function buildBiggestMovers(
   inWindow: Post[],
   start: Date,
   end: Date,
-): MoverRow[] {
+): { gains: MoverRow[]; regressions: MoverRow[] } {
   const rows: MoverRow[] = [];
   for (const post of inWindow) {
     // Skip posts with no snapshots — no movement to report.
     if (post.snapshots.length === 0) continue;
     const sorted = [...post.snapshots].sort((a, b) => a.atMinutes - b.atMinutes);
-    // First snapshot captured in-window, or fall back to the earliest
-    // snapshot overall. A post with only one snapshot total gives
-    // delta = 0 and falls out of the list below — that's the
-    // "graceful single-snapshot" contract the tests pin down.
-    const firstInWindow =
-      sorted.find((s) => {
-        const t = Date.parse(s.capturedAt);
-        return (
-          Number.isFinite(t) && t >= start.getTime() && t < end.getTime()
-        );
-      }) ?? sorted[0];
 
-    const baselinePost = clonePostWithSnapshots(post, [firstInWindow]);
+    // Find the first snapshot captured in-window; the baseline reflects
+    // where the score stood when this window began. If no snapshot lands
+    // in-window (the post is in-window only because of createdAt etc.),
+    // skip it — "movement during the window" is undefined without an
+    // in-window measurement, and falling back to the earliest-ever
+    // snapshot would silently produce inflated multi-month deltas.
+    const firstInWindowIdx = sorted.findIndex((s) => {
+      const t = Date.parse(s.capturedAt);
+      return Number.isFinite(t) && t >= start.getTime() && t <= end.getTime();
+    });
+    if (firstInWindowIdx === -1) continue;
+    const firstInWindow = sorted[firstInWindowIdx];
+
+    // Include the snapshot immediately *before* the first-in-window
+    // snapshot in the baseline so `scoreLive(baselinePost)` has a real
+    // `prev` for its velocity factor — otherwise the baseline falls
+    // back to virality's cold-start velocity formula while the current
+    // score uses real prev, and the resulting delta conflates real
+    // engagement growth with a velocity-formula transition.
+    const baselineSnapshots =
+      firstInWindowIdx > 0
+        ? [sorted[firstInWindowIdx - 1], firstInWindow]
+        : [firstInWindow];
+
+    const baselinePost = clonePostWithSnapshots(post, baselineSnapshots);
     const baselineScore = scoreLive(baselinePost);
     const currentScore = scoreLive(post);
     if (!baselineScore || !currentScore) continue;
     const delta = round1(currentScore.value - baselineScore.value);
     if (delta === 0) continue;
     rows.push({
-      rank: 0, // assigned after sort
+      rank: 0, // assigned after split-and-sort below
       delta,
       scoreNow: round1(currentScore.value),
       platform: post.platform,
@@ -457,8 +536,20 @@ function buildBiggestMovers(
       postId: post.id,
     });
   }
-  rows.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
-  return rows.slice(0, 5).map((r, i) => ({ ...r, rank: i + 1 }));
+  // Surface gains and regressions in separate sorted tables so a -30
+  // crash never visually outranks a +20 gain under one ambiguous
+  // header. Each table is independently capped at 5.
+  const gains = rows
+    .filter((r) => r.delta > 0)
+    .sort((a, b) => b.delta - a.delta)
+    .slice(0, 5)
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+  const regressions = rows
+    .filter((r) => r.delta < 0)
+    .sort((a, b) => a.delta - b.delta)
+    .slice(0, 5)
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+  return { gains, regressions };
 }
 
 function clonePostWithSnapshots(post: Post, snaps: EngagementSnapshot[]): Post {
@@ -493,14 +584,18 @@ function buildByPlatform(inWindow: Post[]): PlatformRow[] {
     // Avg share rate from the latest snapshot of each post that has
     // any snapshots — captures the cohort's actual diffusion. Posts
     // without snapshots are excluded from the share-rate average; they
-    // still count in postCount.
+    // still count in postCount. Snapshots whose impressions AND views
+    // are both zero are also excluded: previously the Math.max(...,1)
+    // fallback divided shares by 1, producing absurd percentages like
+    // "500.00%" for a single fresh snapshot.
     const shareRates: number[] = [];
     for (const p of posts) {
       if (p.snapshots.length === 0) continue;
       const latest = [...p.snapshots]
         .sort((a, b) => a.atMinutes - b.atMinutes)
         .slice(-1)[0];
-      const impressions = Math.max(latest.impressions, latest.views, 1);
+      const impressions = Math.max(latest.impressions, latest.views);
+      if (impressions <= 0) continue;
       shareRates.push(latest.shares / impressions);
     }
     const avgShareRate =
@@ -524,15 +619,32 @@ function buildByPlatform(inWindow: Post[]): PlatformRow[] {
 }
 
 function buildFactorWeakness(inWindow: Post[]): FactorRow[] {
-  // Aggregate recommend() across every live post in the window. Each
-  // recommendation carries a `potentialGain` in score points; summing
-  // them gives the workspace's headroom by factor.
-  const live = inWindow.filter((p) => p.status === "live");
-  const agg = new Map<string, { label: string; gains: number[] }>();
+  // Aggregate recommend() across every live-ish post in the window.
+  // Each recommendation carries a `potentialGain` in score points;
+  // summing them gives the workspace's headroom by factor.
+  //
+  // Use LIVE_POST_STATUSES (which includes "analyzing") so dash and
+  // report agree on which posts count as live; the previous bare
+  // `status === "live"` filter silently dropped analyzing posts that
+  // the dash had already been recommending fixes for.
+  //
+  // Posts are tracked in a Set so `postCount` reflects the number of
+  // distinct posts that surfaced this factor; the previous
+  // `e.gains.length` over-counted if recommend() ever returned more
+  // than one rec with the same factorId for a single post (today it
+  // doesn't, but the rest of the codebase — dash.ts — uses a Set so
+  // we match the contract).
+  const live = inWindow.filter((p) => LIVE_POST_STATUSES.has(p.status));
+  const agg = new Map<
+    string,
+    { label: string; posts: Set<string>; gains: number[] }
+  >();
   for (const post of live) {
     const recs: Recommendation[] = recommend(post, 12);
     for (const r of recs) {
-      const entry = agg.get(r.factorId) ?? { label: r.label, gains: [] };
+      const entry =
+        agg.get(r.factorId) ?? { label: r.label, posts: new Set(), gains: [] };
+      entry.posts.add(post.id);
       entry.gains.push(r.potentialGain);
       agg.set(r.factorId, entry);
     }
@@ -540,9 +652,12 @@ function buildFactorWeakness(inWindow: Post[]): FactorRow[] {
   const rows: FactorRow[] = [...agg.entries()].map(([factorId, e]) => ({
     factorId,
     label: e.label,
-    postCount: e.gains.length,
+    postCount: e.posts.size,
     totalGain: round1(e.gains.reduce((a, b) => a + b, 0)),
-    avgGain: round1(e.gains.reduce((a, b) => a + b, 0) / e.gains.length),
+    avgGain:
+      e.gains.length === 0
+        ? 0
+        : round1(e.gains.reduce((a, b) => a + b, 0) / e.gains.length),
   }));
   rows.sort((a, b) => b.totalGain - a.totalGain);
   return rows.slice(0, 5);
@@ -572,22 +687,32 @@ function buildPlaybookCoverage(inWindow: Post[]): PlaybookRow[] {
 }
 
 function buildSchedule(allPosts: Post[], end: Date): ScheduleRow[] {
-  const horizon = new Date(end.getTime() + 7 * DAY_MS).getTime();
+  // Surface posts whose scheduledAt is in the next 7 days, AND any
+  // posts whose scheduledAt is already past but whose status is still
+  // "scheduled" — those are publishing slips the user almost
+  // certainly wants flagged. Previously these were silently dropped.
+  const lookbackStart = end.getTime() - 30 * DAY_MS;
+  const horizon = end.getTime() + 7 * DAY_MS;
   const rows: ScheduleRow[] = [];
   for (const p of allPosts) {
     if (p.status !== "scheduled") continue;
     if (!p.scheduledAt) continue;
     const t = Date.parse(p.scheduledAt);
     if (!Number.isFinite(t)) continue;
-    if (t < end.getTime() || t > horizon) continue;
+    if (t < lookbackStart || t > horizon) continue;
     rows.push({
       postId: p.id,
       title: p.title,
       platform: p.platform,
       scheduledAt: p.scheduledAt,
+      overdue: t < end.getTime(),
     });
   }
-  rows.sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt));
+  // Overdue first (most urgent), then upcoming chronologically.
+  rows.sort((a, b) => {
+    if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+    return Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt);
+  });
   return rows;
 }
 
@@ -612,10 +737,18 @@ function buildProjectPulse(
       project.status !== "done" && project.status !== "cancelled";
     if (closed === 0 && created === 0 && !isActive) continue;
 
-    const totalTasks = tasks.length;
-    const doneTasks = tasks.filter((t) => t.status === "done").length;
+    // Exclude cancelled tasks from the denominator: a project with 5
+    // done + 5 cancelled is shipped, not 50% complete. dash.ts already
+    // uses the (status !== "done" && status !== "cancelled") convention
+    // for its open-task counts; mirror that here.
+    const denominatorTasks = tasks.filter((t) => t.status !== "cancelled");
+    const doneTasks = denominatorTasks.filter(
+      (t) => t.status === "done",
+    ).length;
     const percentComplete =
-      totalTasks === 0 ? 0 : Math.round((doneTasks / totalTasks) * 100);
+      denominatorTasks.length === 0
+        ? 0
+        : Math.round((doneTasks / denominatorTasks.length) * 100);
 
     const status = projectStatus(project, percentComplete, end);
     rows.push({
@@ -685,8 +818,13 @@ function platformLabel(id: Platform): string {
 /** Escape pipe and newline characters so markdown tables stay intact. */
 function cell(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "—";
-  const s = String(value);
-  return s.replace(/\|/g, "\\|").replace(/\n/g, " ");
+  // Escape pipes (markdown table delimiter) and collapse any line
+  // breaks — including Windows-style \r\n — to a single space.
+  // Stripping only \n leaves a raw CR in the cell which some markdown
+  // renderers display as a control glyph or stray block break.
+  return String(value)
+    .replace(/\|/g, "\\|")
+    .replace(/\r\n|\r|\n/g, " ");
 }
 
 function renderTable(headers: string[], rows: string[][]): string {
@@ -750,17 +888,36 @@ export function renderMarkdown(r: ReportData): string {
     );
   }
 
-  // 4. Biggest movers
-  sections.push("## Biggest movers");
-  if (r.biggestMovers.length === 0) {
-    sections.push("_No posts with enough snapshot movement to report._");
+  // 4. Biggest gains
+  sections.push("## Biggest gains");
+  if (r.biggestMovers.gains.length === 0) {
+    sections.push("_No posts gained score in-window._");
   } else {
     sections.push(
       renderTable(
         ["#", "Δ", "Score now", "Platform", "Title"],
-        r.biggestMovers.map((m) => [
+        r.biggestMovers.gains.map((m) => [
           cell(m.rank),
-          cell(`${m.delta >= 0 ? "+" : ""}${m.delta}`),
+          cell(`+${m.delta}`),
+          cell(m.scoreNow),
+          cell(platformLabel(m.platform)),
+          cell(m.title),
+        ]),
+      ),
+    );
+  }
+
+  // 4b. Biggest regressions
+  sections.push("## Biggest regressions");
+  if (r.biggestMovers.regressions.length === 0) {
+    sections.push("_No posts regressed in-window._");
+  } else {
+    sections.push(
+      renderTable(
+        ["#", "Δ", "Score now", "Platform", "Title"],
+        r.biggestMovers.regressions.map((m) => [
+          cell(m.rank),
+          cell(String(m.delta)),
           cell(m.scoreNow),
           cell(platformLabel(m.platform)),
           cell(m.title),
@@ -826,16 +983,17 @@ export function renderMarkdown(r: ReportData): string {
     );
   }
 
-  // 8. Schedule
-  sections.push("## Schedule (next 7 days)");
+  // 8. Schedule — past-due slips first, then upcoming.
+  sections.push("## Schedule");
   if (r.schedule.length === 0) {
-    sections.push("_Nothing scheduled in the next 7 days._");
+    sections.push("_Nothing scheduled in the next 7 days or overdue._");
   } else {
     sections.push(
       renderTable(
-        ["When", "Platform", "Title"],
+        ["When", "Status", "Platform", "Title"],
         r.schedule.map((s) => [
           cell(s.scheduledAt),
+          cell(s.overdue ? "⚠ overdue" : "upcoming"),
           cell(platformLabel(s.platform)),
           cell(s.title),
         ]),

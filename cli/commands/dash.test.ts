@@ -64,8 +64,10 @@ describe("runDash", () => {
       assert.match(out, /NEEDS SNAPSHOTS/);
       assert.match(out, /TOP RECOMMENDATIONS/);
       assert.match(out, /OVERDUE/);
-      // Footer summary line is present.
-      assert.match(out, /open · \d+ hot · \d+ overdue · last save:/);
+      // Footer summary line includes all three counts. The earlier
+      // regex only anchored "hot" and "overdue", so a missing "open"
+      // count would have passed the test.
+      assert.match(out, /\d+ open · \d+ hot · \d+ overdue · last save:/);
       // Uses unicode box dividers, not ASCII dashes.
       assert.match(out, /─{10}/);
       // Never exceeds the 80-char width budget.
@@ -155,25 +157,59 @@ describe("runDash", () => {
     }
   });
 
-  it("respects --limit on every list section", async () => {
-    const cap = captureStdout();
+  it("respects --limit on every list section (including recommendations)", async () => {
+    // Compare an unrestricted run against --limit=1; for sections
+    // whose unrestricted result is at least one row, the limited run
+    // must trim to exactly 1. This guards against the earlier
+    // pass-vacuously trap where a naturally-empty section satisfied
+    // `length <= 1` even if --limit were silently ignored.
+    const unlimited = captureStdout();
+    let full: {
+      sections: {
+        myDay: unknown[];
+        hotPosts: unknown[];
+        needsSnapshots: unknown[];
+        recommendations: unknown[];
+        overdue: unknown[];
+      };
+    };
+    try {
+      const code = await runDash([
+        "--vault",
+        root,
+        "--limit",
+        "20",
+        "--json",
+      ]);
+      assert.equal(code, 0);
+      full = JSON.parse(unlimited.output);
+    } finally {
+      unlimited.restore();
+    }
+
+    const limited = captureStdout();
+    let small: typeof full;
     try {
       const code = await runDash(["--vault", root, "--limit", "1", "--json"]);
       assert.equal(code, 0);
-      const parsed = JSON.parse(cap.output) as {
-        sections: {
-          myDay: unknown[];
-          hotPosts: unknown[];
-          needsSnapshots: unknown[];
-          overdue: unknown[];
-        };
-      };
-      assert.ok(parsed.sections.myDay.length <= 1);
-      assert.ok(parsed.sections.hotPosts.length <= 1);
-      assert.ok(parsed.sections.needsSnapshots.length <= 1);
-      assert.ok(parsed.sections.overdue.length <= 1);
+      small = JSON.parse(limited.output);
     } finally {
-      cap.restore();
+      limited.restore();
+    }
+
+    for (const key of [
+      "myDay",
+      "hotPosts",
+      "needsSnapshots",
+      "recommendations",
+      "overdue",
+    ] as const) {
+      const expected = Math.min(full.sections[key].length, 1);
+      assert.equal(
+        small.sections[key].length,
+        expected,
+        `section ${key} should respect --limit=1 (full=${full.sections[key].length}, got ${small.sections[key].length})`,
+      );
     }
   });
 
