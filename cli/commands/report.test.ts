@@ -96,6 +96,19 @@ describe("isoWeekId", () => {
     // 2027-01-01 (Friday) belongs to 2026-W53.
     assert.equal(isoWeekId(new Date("2027-01-01T00:00:00Z")), "2026-W53");
   });
+
+  it("zero-pads sub-1000 ISO years to 4 digits and preserves the actual year", () => {
+    // Two guards in one test:
+    //   1. Format guard — year is padded to 4 digits, so a year-1 input
+    //      yields "0001-W01" not "1-W01".
+    //   2. Value guard — the year is the actual input year, not
+    //      something silently re-stamped by Date.UTC(year, ...)'s
+    //      legacy +1900 offset for years 0-99 (which would emit
+    //      "1901-W01" for the same input).
+    const id = isoWeekId(new Date("0001-01-04T00:00:00Z"));
+    assert.match(id, /^\d{4}-W\d{2}$/);
+    assert.ok(id.startsWith("0001-"), `expected year 0001, got "${id}"`);
+  });
 });
 
 describe("runReport — file output", () => {
@@ -264,6 +277,76 @@ describe("biggest movers — gracefully handles single-snapshot posts", () => {
     // arrays were empty.
     assert.equal(parsed.biggestMovers.gains.length, 0);
     assert.equal(parsed.biggestMovers.regressions.length, 0);
+  });
+});
+
+describe("runReport — robustness against malformed posts", () => {
+  it("does not crash when a post has a platform value outside the PROFILES union", async () => {
+    // The scoring engine throws on `PROFILES[unknownPlatform].intrinsicWeights`.
+    // Report previously had no try/catch around scoreFor / bandFor /
+    // recommend / projectThreshold, so one bad post killed the whole
+    // run. The fix wraps every virality call so a single malformed row
+    // is silently skipped from the scored sections while everything
+    // else still renders.
+    const root = await tmpVault();
+    const wsFile = path.join(root, "workspace.json");
+    const raw = JSON.parse(await fs.readFile(wsFile, "utf-8"));
+    (raw.posts as Array<{ platform: string }>)[0].platform = "myspace_2007";
+    await fs.writeFile(wsFile, JSON.stringify(raw, null, 2), "utf-8");
+
+    const { code, out } = await captureStdout(() =>
+      runReport([
+        "--vault",
+        root,
+        "--json",
+        "--since",
+        "0001-01-01T00:00:00Z",
+      ]),
+    );
+    assert.equal(code, 0);
+    const parsed = JSON.parse(out) as ReportData;
+    // The malformed post is filtered out of scored sections; the rest
+    // of the report still computes.
+    assert.equal(typeof parsed.weekId, "string");
+    assert.ok(Array.isArray(parsed.topPerformers));
+    assert.ok(Array.isArray(parsed.byPlatform));
+  });
+});
+
+describe("runReport — schedule surfaces old slips without lookback", () => {
+  it("includes a >30-day-overdue scheduled post in the schedule section", async () => {
+    // Bug: buildSchedule previously bounded overdue lookback to 30
+    // days, so a 60-day-old slip was silently dropped while the
+    // empty-state copy claimed coverage of "or overdue". The fix
+    // removes the lookback cap for past-scheduled posts.
+    const root = await tmpVault();
+    const wsFile = path.join(root, "workspace.json");
+    const raw = JSON.parse(await fs.readFile(wsFile, "utf-8"));
+    const sixtyDaysAgo = new Date(
+      Date.now() - 60 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const targetPost = (raw.posts as Array<{
+      id: string;
+      status: string;
+      scheduledAt?: string;
+    }>)[0];
+    targetPost.status = "scheduled";
+    targetPost.scheduledAt = sixtyDaysAgo;
+    await fs.writeFile(wsFile, JSON.stringify(raw, null, 2), "utf-8");
+
+    const { code, out } = await captureStdout(() =>
+      runReport(["--vault", root, "--json"]),
+    );
+    assert.equal(code, 0);
+    const parsed = JSON.parse(out) as ReportData;
+    const hit = parsed.schedule.find((s) => s.postId === targetPost.id);
+    assert.ok(
+      hit,
+      `expected 60-day-overdue scheduled post in schedule (got ${JSON.stringify(
+        parsed.schedule.map((s) => s.postId),
+      )})`,
+    );
+    assert.equal(hit!.overdue, true);
   });
 });
 

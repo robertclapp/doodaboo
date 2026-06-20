@@ -4,6 +4,7 @@ import { loadWorkspace, vaultPaths } from "../../src/lib/vault.js";
 import { fail, parseArgs, vaultRoot } from "../util.js";
 import {
   EngagementSnapshot,
+  LIVE_POST_STATUSES,
   Platform,
   PLATFORMS,
   Post,
@@ -171,20 +172,25 @@ function parseSinceFlag(raw: string): Date {
  * year boundaries — e.g. 2027-01-01 belongs to 2026-W53.
  */
 export function isoWeekId(input: Date): string {
-  // Work in UTC to avoid DST drift moving us across a day boundary.
-  const d = new Date(
-    Date.UTC(input.getUTCFullYear(), input.getUTCMonth(), input.getUTCDate()),
-  );
+  // Work in UTC midnight to avoid DST drift moving us across a day
+  // boundary. Use setUTCHours / setUTCFullYear rather than the
+  // `Date.UTC(year, ...)` form: that form silently adds 1900 to years
+  // 0–99 (an ECMA-262 legacy quirk), so a real year-1 input would be
+  // re-stamped as year 1901.
+  const d = new Date(input.getTime());
+  d.setUTCHours(0, 0, 0, 0);
   const dayNum = d.getUTCDay() === 0 ? 7 : d.getUTCDay();
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const year = d.getUTCFullYear();
-  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4 = new Date(0);
+  jan4.setUTCFullYear(year, 0, 4);
+  jan4.setUTCHours(0, 0, 0, 0);
   const jan4Day = jan4.getUTCDay() === 0 ? 7 : jan4.getUTCDay();
   const week1Thursday = new Date(jan4);
   week1Thursday.setUTCDate(jan4.getUTCDate() + 4 - jan4Day);
   const weekNum =
     1 + Math.round((d.getTime() - week1Thursday.getTime()) / (7 * DAY_MS));
-  return `${year}-W${String(weekNum).padStart(2, "0")}`;
+  return `${String(year).padStart(4, "0")}-W${String(weekNum).padStart(2, "0")}`;
 }
 
 // ── Report data model ───────────────────────────────────────────────────────
@@ -293,10 +299,6 @@ interface ProjectPulseRow {
 
 // ── Build ───────────────────────────────────────────────────────────────────
 
-// Posts that "live for recommendations". Mirrors dash.ts so dash and
-// report agree on which posts deserve scoring attention.
-const LIVE_POST_STATUSES = new Set<Post["status"]>(["live", "analyzing"]);
-
 function buildReport(
   state: WorkspaceState,
   root: string,
@@ -381,20 +383,63 @@ function postIsInWindow(post: Post, start: Date, end: Date): boolean {
   return false;
 }
 
+// Single scoring entry point: compute scoreLive (with intrinsic
+// fallback) once per post and cache by Post reference. Every section
+// reads through this, so scoring is per-post-O(1) across the whole
+// report instead of O(sections × passes). Wrapping in try/catch makes
+// the report tolerate a single malformed post (unknown platform,
+// missing context/threshold) the same way dash.ts does — one bad row
+// no longer aborts the run.
+const scoreCache = new WeakMap<Post, { value: number; band: ScoreBand } | null>();
+
+function score(post: Post): { value: number; band: ScoreBand } | null {
+  const cached = scoreCache.get(post);
+  if (cached !== undefined) return cached;
+  let result: { value: number; band: ScoreBand } | null = null;
+  try {
+    const live = scoreLive(post);
+    const s = live ?? scoreIntrinsic(post);
+    result = { value: s.value, band: s.band };
+  } catch {
+    result = null;
+  }
+  scoreCache.set(post, result);
+  return result;
+}
+
 function scoreFor(post: Post): number | null {
-  const live = scoreLive(post);
-  if (live) return live.value;
-  const intrinsic = scoreIntrinsic(post);
-  return intrinsic.value;
+  return score(post)?.value ?? null;
 }
 
-function bandFor(post: Post): ScoreBand {
-  const live = scoreLive(post);
-  return (live ?? scoreIntrinsic(post)).band;
+function bandFor(post: Post): ScoreBand | null {
+  return score(post)?.band ?? null;
 }
 
-function isHotPlus(band: ScoreBand): boolean {
+function isHotPlus(band: ScoreBand | null): boolean {
   return band === "hot" || band === "rocket";
+}
+
+// Wraps projectThreshold so malformed thresholds (out-of-union window,
+// missing post.threshold) downgrade to "no projection" instead of
+// returning NaN or throwing through a section builder.
+function safeProjection(
+  post: Post,
+): { metric: string; projected: number } | null {
+  try {
+    const p = projectThreshold(post);
+    if (!p || !Number.isFinite(p.projected)) return null;
+    return p;
+  } catch {
+    return null;
+  }
+}
+
+function safeRecommend(post: Post, max: number): Recommendation[] {
+  try {
+    return recommend(post, max);
+  } catch {
+    return [];
+  }
 }
 
 function bandLabel(band: ScoreBand): string {
@@ -417,9 +462,21 @@ function pct(n: number): string {
 // ── Section builders ────────────────────────────────────────────────────────
 
 function buildHeadline(inWindow: Post[], prior: Post[]): HeadlineData {
-  const scoresNow = inWindow
-    .map((p) => scoreFor(p))
-    .filter((s): s is number => s != null);
+  // Single pass: cached score() returns the same {value, band} for
+  // every consumer below — avg, best, hotPlus — so we don't have to
+  // walk inWindow four times.
+  const scoresNow: number[] = [];
+  let best: HeadlineData["bestPost"] = null;
+  let hotPlusCount = 0;
+  for (const p of inWindow) {
+    const s = score(p);
+    if (!s) continue;
+    scoresNow.push(s.value);
+    if (!best || s.value > best.score) {
+      best = { id: p.id, title: p.title, score: s.value, band: s.band };
+    }
+    if (isHotPlus(s.band)) hotPlusCount += 1;
+  }
   const scoresPrior = prior
     .map((p) => scoreFor(p))
     .filter((s): s is number => s != null);
@@ -427,18 +484,6 @@ function buildHeadline(inWindow: Post[], prior: Post[]): HeadlineData {
   const avgPrior = avg(scoresPrior);
   const delta =
     avgNow != null && avgPrior != null ? round1(avgNow - avgPrior) : null;
-
-  let best: HeadlineData["bestPost"] = null;
-  for (const p of inWindow) {
-    const score = scoreFor(p);
-    if (score == null) continue;
-    if (!best || score > best.score) {
-      best = { id: p.id, title: p.title, score, band: bandFor(p) };
-    }
-  }
-
-  const hotPlusCount = inWindow.filter((p) => isHotPlus(bandFor(p))).length;
-
   return {
     avgScoreThis: avgNow,
     avgScorePrior: avgPrior,
@@ -449,10 +494,12 @@ function buildHeadline(inWindow: Post[], prior: Post[]): HeadlineData {
 }
 
 function buildTopPerformers(inWindow: Post[]): TopPerformerRow[] {
-  const scored = inWindow
-    .map((p) => ({ post: p, score: scoreFor(p) }))
-    .filter((x): x is { post: Post; score: number } => x.score != null)
-    .sort((a, b) => b.score - a.score);
+  const scored: { post: Post; score: number; band: ScoreBand }[] = [];
+  for (const p of inWindow) {
+    const s = score(p);
+    if (s) scored.push({ post: p, score: s.value, band: s.band });
+  }
+  scored.sort((a, b) => b.score - a.score);
 
   if (scored.length === 0) return [];
 
@@ -468,13 +515,12 @@ function buildTopPerformers(inWindow: Post[]): TopPerformerRow[] {
   const taken = decile.slice(0, 10);
 
   return taken.map((x, i) => {
-    const band = bandFor(x.post);
-    const projection = projectThreshold(x.post);
+    const projection = safeProjection(x.post);
     return {
       rank: i + 1,
       score: round1(x.score),
-      band,
-      bandLabel: bandLabel(band),
+      band: x.band,
+      bandLabel: bandLabel(x.band),
       platform: x.post.platform,
       title: x.post.title,
       postId: x.post.id,
@@ -522,8 +568,15 @@ function buildBiggestMovers(
         : [firstInWindow];
 
     const baselinePost = clonePostWithSnapshots(post, baselineSnapshots);
-    const baselineScore = scoreLive(baselinePost);
-    const currentScore = scoreLive(post);
+    let baselineScore, currentScore;
+    try {
+      baselineScore = scoreLive(baselinePost);
+      currentScore = scoreLive(post);
+    } catch {
+      // Malformed post (unknown platform, missing context) — skip it
+      // from movers rather than aborting the whole section.
+      continue;
+    }
     if (!baselineScore || !currentScore) continue;
     const delta = round1(currentScore.value - baselineScore.value);
     if (delta === 0) continue;
@@ -566,37 +619,46 @@ function buildByPlatform(inWindow: Post[]): PlatformRow[] {
 
   const rows: PlatformRow[] = [];
   for (const [platform, posts] of byPlat) {
-    const scores = posts
-      .map((p) => scoreFor(p))
-      .filter((s): s is number => s != null);
-    if (scores.length === 0) continue;
-    const avgScore = round1(scores.reduce((a, b) => a + b, 0) / scores.length);
-
-    let hottest: { post: Post; score: number } | null = null;
+    const scored: { post: Post; value: number; band: ScoreBand }[] = [];
     for (const p of posts) {
-      const s = scoreFor(p);
-      if (s == null) continue;
-      if (!hottest || s > hottest.score) hottest = { post: p, score: s };
+      const s = score(p);
+      if (s) scored.push({ post: p, value: s.value, band: s.band });
     }
+    if (scored.length === 0) continue;
+    const avgScore = round1(
+      scored.reduce((a, b) => a + b.value, 0) / scored.length,
+    );
 
-    const hotPlusCount = posts.filter((p) => isHotPlus(bandFor(p))).length;
+    let hottest = scored[0];
+    for (const x of scored) if (x.value > hottest.value) hottest = x;
 
-    // Avg share rate from the latest snapshot of each post that has
-    // any snapshots — captures the cohort's actual diffusion. Posts
-    // without snapshots are excluded from the share-rate average; they
-    // still count in postCount. Snapshots whose impressions AND views
-    // are both zero are also excluded: previously the Math.max(...,1)
-    // fallback divided shares by 1, producing absurd percentages like
-    // "500.00%" for a single fresh snapshot.
+    const hotPlusCount = scored.filter((x) => isHotPlus(x.band)).length;
+
+    // Avg share rate per post: pick the snapshot with the most reach
+    // (max impressions or views), since cumulative engagement metrics
+    // can only grow over time, that snapshot has the most reliable
+    // shares/impressions ratio. Picking by atMinutes alone would skip
+    // posts whose final-by-atMinutes snapshot is a sparse backfill with
+    // zero impressions while earlier snapshots had real reach.
+    // Snapshots whose impressions AND views are both zero are excluded:
+    // previously the Math.max(...,1) fallback divided shares by 1,
+    // producing absurd percentages like "500.00%" for a single fresh
+    // snapshot.
     const shareRates: number[] = [];
     for (const p of posts) {
       if (p.snapshots.length === 0) continue;
-      const latest = [...p.snapshots]
-        .sort((a, b) => a.atMinutes - b.atMinutes)
-        .slice(-1)[0];
-      const impressions = Math.max(latest.impressions, latest.views);
-      if (impressions <= 0) continue;
-      shareRates.push(latest.shares / impressions);
+      let best = p.snapshots[0];
+      let bestReach = Math.max(best.impressions, best.views);
+      for (let i = 1; i < p.snapshots.length; i++) {
+        const s = p.snapshots[i];
+        const reach = Math.max(s.impressions, s.views);
+        if (reach > bestReach) {
+          best = s;
+          bestReach = reach;
+        }
+      }
+      if (bestReach <= 0) continue;
+      shareRates.push(best.shares / bestReach);
     }
     const avgShareRate =
       shareRates.length === 0
@@ -607,9 +669,9 @@ function buildByPlatform(inWindow: Post[]): PlatformRow[] {
       platform,
       postCount: posts.length,
       avgScore,
-      hottestPostTitle: hottest!.post.title,
-      hottestPostId: hottest!.post.id,
-      hottestPostScore: round1(hottest!.score),
+      hottestPostTitle: hottest.post.title,
+      hottestPostId: hottest.post.id,
+      hottestPostScore: round1(hottest.value),
       hotPlusCount,
       avgShareRate,
     });
@@ -640,7 +702,7 @@ function buildFactorWeakness(inWindow: Post[]): FactorRow[] {
     { label: string; posts: Set<string>; gains: number[] }
   >();
   for (const post of live) {
-    const recs: Recommendation[] = recommend(post, 12);
+    const recs = safeRecommend(post, 12);
     for (const r of recs) {
       const entry =
         agg.get(r.factorId) ?? { label: r.label, posts: new Set(), gains: [] };
@@ -690,8 +752,10 @@ function buildSchedule(allPosts: Post[], end: Date): ScheduleRow[] {
   // Surface posts whose scheduledAt is in the next 7 days, AND any
   // posts whose scheduledAt is already past but whose status is still
   // "scheduled" — those are publishing slips the user almost
-  // certainly wants flagged. Previously these were silently dropped.
-  const lookbackStart = end.getTime() - 30 * DAY_MS;
+  // certainly wants flagged. No lookback cap on overdue: a 60-day-old
+  // slip is exactly the kind of forgotten draft the section's
+  // empty-state copy ("Nothing scheduled in the next 7 days or
+  // overdue") promises to cover.
   const horizon = end.getTime() + 7 * DAY_MS;
   const rows: ScheduleRow[] = [];
   for (const p of allPosts) {
@@ -699,7 +763,7 @@ function buildSchedule(allPosts: Post[], end: Date): ScheduleRow[] {
     if (!p.scheduledAt) continue;
     const t = Date.parse(p.scheduledAt);
     if (!Number.isFinite(t)) continue;
-    if (t < lookbackStart || t > horizon) continue;
+    if (t > horizon) continue;
     rows.push({
       postId: p.id,
       title: p.title,

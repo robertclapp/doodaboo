@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import { loadWorkspace, vaultPaths } from "../../src/lib/vault.js";
 import { parseArgs, vaultRoot, fail } from "../util.js";
 import {
+  LIVE_POST_STATUSES,
   Post,
   Priority,
   Project,
@@ -47,8 +48,6 @@ const DEFAULT_LIMIT = 5;
 
 // "Open" tasks for the "my day" section: actionable things assigned to you.
 const MY_DAY_STATUSES = new Set(["todo", "in_progress", "in_review"]);
-// Posts that count as "live" for hot/needs-snapshots/recommendations.
-const LIVE_POST_STATUSES = new Set(["live", "analyzing"]);
 const SNAPSHOT_STALE_MS = 24 * 60 * 60 * 1000;
 
 export async function runDash(argv: string[]): Promise<number> {
@@ -259,15 +258,17 @@ function buildNeedsSnapshots(
 ): NeedsSnapshotRow[] {
   const candidates = posts
     // "analyzing" posts have the same need-a-snapshot pressure as
-    // "live" — every other live-section helper in this file uses
-    // LIVE_POST_STATUSES, so match that contract here.
+    // "live" — every other live-section helper uses LIVE_POST_STATUSES,
+    // so match that contract here.
     .filter((p) => LIVE_POST_STATUSES.has(p.status))
     .map((p) => {
-      const latest = latestSnapshot(p);
-      const lastAt = latest ? new Date(latest.capturedAt).getTime() : undefined;
-      const stale =
-        lastAt === undefined ? true : now - lastAt > SNAPSHOT_STALE_MS;
-      return { post: p, lastAt, stale };
+      // Staleness is "when was the most recent snapshot RECORDED?" —
+      // that's max(capturedAt), not max(atMinutes). Sorting by atMinutes
+      // would pick the snapshot at the largest post-launch offset, which
+      // can be an out-of-order backfill captured months ago even though
+      // a smaller-atMinutes snapshot was recorded today.
+      const last = lastCapturedSnapshot(p);
+      return { post: p, lastAt: last, stale: last === undefined || now - last > SNAPSHOT_STALE_MS };
     })
     .filter((r) => r.stale)
     .sort((a, b) => {
@@ -283,7 +284,11 @@ function buildNeedsSnapshots(
     platform: post.platform,
     platformShort: platformShort(post.platform),
     title: post.title,
-    lastSnapshotAt: lastAt ? new Date(lastAt).toISOString() : undefined,
+    // Strict undefined check so an epoch-0 lastAt (corrupt capturedAt)
+    // stays consistent with the staleness branch below, which also
+    // keys off `=== undefined`.
+    lastSnapshotAt:
+      lastAt === undefined ? undefined : new Date(lastAt).toISOString(),
     staleness:
       lastAt === undefined
         ? "no snapshots"
@@ -477,13 +482,21 @@ async function readLastUpdate(root: string): Promise<string | undefined> {
   }
 }
 
-function latestSnapshot(post: Post) {
-  if (post.snapshots.length === 0) return undefined;
-  // Sort by atMinutes (the post-launch offset) to match what scoreLive
-  // and the rest of the scoring engine treat as "latest". Sorting by
-  // capturedAt instead would disagree with the displayed score when a
-  // snapshot was backfilled out of chronological order.
-  return [...post.snapshots].sort((a, b) => a.atMinutes - b.atMinutes).slice(-1)[0];
+// "Was a snapshot recorded recently?" picks the snapshot with the
+// largest wall-clock capturedAt. Returns undefined for no snapshots or
+// when every capturedAt is unparseable; the caller treats either case
+// as "needs a snapshot." This is intentionally NOT the same as
+// scoreLive's "latest snapshot" (max atMinutes), which answers a
+// different question — what's the most recent data point in the post's
+// lifetime — and stays in the scoring engine.
+function lastCapturedSnapshot(post: Post): number | undefined {
+  let max: number | undefined = undefined;
+  for (const s of post.snapshots) {
+    const t = Date.parse(s.capturedAt);
+    if (!Number.isFinite(t)) continue;
+    if (max === undefined || t > max) max = t;
+  }
+  return max;
 }
 
 function priorityIcon(p: Priority): string {

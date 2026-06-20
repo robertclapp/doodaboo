@@ -213,6 +213,73 @@ describe("runDash", () => {
     }
   });
 
+  it("measures snapshot staleness by capturedAt, not atMinutes (backfill-safe)", async () => {
+    // Reproduce the atMinutes-vs-capturedAt bug: give a live post two
+    // snapshots — a fresh capture today at atMinutes=30 and a stale
+    // backfilled capture from 6 months ago at atMinutes=1440. The old
+    // code sorted by atMinutes, picked the 1440 entry, and reported the
+    // post as months stale; the fix reads max(capturedAt), so the post
+    // is correctly considered fresh and never lands in NEEDS SNAPSHOTS.
+    const wsFile = path.join(root, "workspace.json");
+    const raw = JSON.parse(await fs.readFile(wsFile, "utf-8"));
+    const livePosts = (raw.posts as Array<{
+      id: string;
+      status: string;
+      snapshots: Array<{ capturedAt: string; atMinutes: number }>;
+    }>).filter((p) => p.status === "live" || p.status === "analyzing");
+    assert.ok(livePosts.length > 0, "seed must contain a live post");
+    const today = new Date().toISOString();
+    const sixMonthsAgo = new Date(
+      Date.now() - 180 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    livePosts[0].snapshots = [
+      { capturedAt: today, atMinutes: 30, id: "s-fresh", impressions: 100, views: 100, likes: 0, comments: 0, shares: 0, saves: 0 } as never,
+      { capturedAt: sixMonthsAgo, atMinutes: 1440, id: "s-stale-backfill", impressions: 200, views: 200, likes: 0, comments: 0, shares: 0, saves: 0 } as never,
+    ];
+    await fs.writeFile(wsFile, JSON.stringify(raw, null, 2), "utf-8");
+
+    const cap = captureStdout();
+    let parsed: { sections: { needsSnapshots: Array<{ id: string }> } };
+    try {
+      const code = await runDash(["--vault", root, "--json"]);
+      assert.equal(code, 0);
+      parsed = JSON.parse(cap.output);
+    } finally {
+      cap.restore();
+    }
+    const targetId = livePosts[0].id;
+    assert.ok(
+      !parsed.sections.needsSnapshots.some((r) => r.id === targetId),
+      `post with fresh capturedAt should NOT be flagged as needing a snapshot (got ${JSON.stringify(
+        parsed.sections.needsSnapshots.map((r) => r.id),
+      )})`,
+    );
+  });
+
+  it("tolerates a malformed post (unknown platform) without crashing", async () => {
+    // Inject a live post with a platform value outside the PROFILES
+    // union. The scoring engine throws on that, but dash should catch
+    // and still render every section.
+    const wsFile = path.join(root, "workspace.json");
+    const raw = JSON.parse(await fs.readFile(wsFile, "utf-8"));
+    const livePosts = (raw.posts as Array<{ status: string; platform: string }>).filter(
+      (p) => p.status === "live" || p.status === "analyzing",
+    );
+    assert.ok(livePosts.length > 0, "seed must contain a live post");
+    livePosts[0].platform = "myspace_2007" as never;
+    await fs.writeFile(wsFile, JSON.stringify(raw, null, 2), "utf-8");
+
+    const cap = captureStdout();
+    try {
+      const code = await runDash(["--vault", root]);
+      assert.equal(code, 0);
+      assert.match(cap.output, /HOT POSTS/);
+      assert.match(cap.output, /TOP RECOMMENDATIONS/);
+    } finally {
+      cap.restore();
+    }
+  });
+
   it("shows --help without touching the vault", async () => {
     const cap = captureStdout();
     try {

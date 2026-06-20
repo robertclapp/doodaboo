@@ -180,16 +180,35 @@ jobs:
           # ${{ ... }}-substituting it into the JS source. A future matrix
           # value containing a backtick or ${ would otherwise inject JS
           # into a step that has issues:write.
+          # Stable title (no date) so repeat weekly failures comment on
+          # the same issue rather than spawning a fresh one each Monday.
           script: |
             const label = process.env.PLATFORM_LABEL;
-            const today = new Date().toISOString().slice(0, 10);
-            await github.rest.issues.create({
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            const title = `[ops] Weekly Tauri ${label} sanity build failing`;
+            const { data: open } = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `[ops] Weekly Tauri ${label} sanity build failed ${today}`,
-              body: `Tauri/cargo check failed for ${label}. Run: ${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
-              labels: ["ops:tauri"],
+              state: "open",
+              labels: "ops:tauri",
             });
+            const existing = open.find((i) => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Failed again ${new Date().toISOString().slice(0, 10)}. Run: ${runUrl}`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body: `Tauri/cargo check failed for ${label}. Run: ${runUrl}`,
+                labels: ["ops:tauri"],
+              });
+            }
 
   audit:
     name: npm audit
