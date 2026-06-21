@@ -15,6 +15,38 @@ test.describe("Dashboard + global shell", () => {
     ).toBeVisible();
   });
 
+  test("My Day list anchors the dashboard and Focus collapses everything else", async ({
+    page,
+  }) => {
+    // My Day is the new ADHD-UX top-of-page surface: capped at 5, sorted
+    // priority-then-due, scoped to MY_DAY_STATUSES. With seed data the
+    // current user always owns at least one in-flight task.
+    const myDay = page.getByRole("region", { name: "My Day" });
+    await expect(myDay).toBeVisible();
+    const focusButtons = myDay.getByRole("button", { name: /^Focus on/i });
+    await expect(focusButtons.first()).toBeVisible();
+
+    // Workload counters and the rest of the dashboard live below My Day
+    // by default; Focus is what hides them.
+    await expect(page.getByText(/Workload ·/)).toBeVisible();
+    await expect(page.getByText(/Top posts/i)).toBeVisible();
+
+    await focusButtons.first().click();
+
+    // Focus mode: only the one task + escape hatch should be visible.
+    await expect(
+      page.getByRole("button", { name: /Show everything/i }),
+    ).toBeVisible();
+    await expect(page.getByText(/One thing at a time/i)).toBeVisible();
+    await expect(page.getByText(/Workload ·/)).toHaveCount(0);
+    await expect(page.getByText(/Top posts/i)).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "My Day" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: /Show everything/i }).click();
+    await expect(page.getByRole("region", { name: "My Day" })).toBeVisible();
+    await expect(page.getByText(/Workload ·/)).toBeVisible();
+  });
+
   test("Cmd+K opens the command palette and navigates to Posts", async ({
     page,
   }) => {
