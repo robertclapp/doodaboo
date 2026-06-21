@@ -48,8 +48,11 @@ const ENV_ALLOWLIST = [
   "NPM_CONFIG_PREFIX",
 ] as const;
 
-function safeEnv(extra: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = {};
+function safeEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
+  // Next.js's ambient ProcessEnv augmentation marks NODE_ENV as a
+  // required string. Start from {} but cast to satisfy the structural
+  // requirement; spawnSync inherits whatever is set anyway.
+  const out: NodeJS.ProcessEnv = {} as NodeJS.ProcessEnv;
   for (const k of ENV_ALLOWLIST) {
     const v = process.env[k];
     if (v !== undefined) out[k] = v;
