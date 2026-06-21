@@ -36,6 +36,7 @@ export default function PostDetailPage() {
   const post = useStore((s) => s.posts.find((p) => p.id === postId));
   const updatePost = useStore((s) => s.updatePost);
   const deletePost = useStore((s) => s.deletePost);
+  const restorePost = useStore((s) => s.restorePost);
   const duplicatePost = useStore((s) => s.duplicatePost);
   const addSnapshot = useStore((s) => s.addSnapshot);
   const removeSnapshot = useStore((s) => s.removeSnapshot);
@@ -144,8 +145,16 @@ export default function PostDetailPage() {
                   destructive: true,
                 });
                 if (ok) {
+                  // Snapshot BEFORE delete so Undo restores snapshots,
+                  // score history, original ID, and timestamps.
+                  const snapshot = post;
                   deletePost(post.id);
-                  toast.success("Post deleted");
+                  toast.success(`Deleted ${post.title || "post"}`, {
+                    action: {
+                      label: "Undo",
+                      onClick: () => restorePost(snapshot),
+                    },
+                  });
                   router.push("/posts");
                 }
               }}

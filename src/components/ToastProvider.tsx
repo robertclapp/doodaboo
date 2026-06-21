@@ -17,19 +17,37 @@ import { Button } from "./ui/Button";
 
 type ToastVariant = "info" | "success" | "warning" | "error";
 
+interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface Toast {
   id: number;
   message: string;
   variant: ToastVariant;
   ttl: number;
+  action?: ToastAction;
+}
+
+interface ToastOptions {
+  ttl?: number;
+  action?: ToastAction;
 }
 
 interface ToastApi {
-  show: (message: string, variant?: ToastVariant, ttl?: number) => void;
-  success: (message: string, ttl?: number) => void;
-  error: (message: string, ttl?: number) => void;
-  info: (message: string, ttl?: number) => void;
+  show: (
+    message: string,
+    variant?: ToastVariant,
+    optsOrTtl?: number | ToastOptions,
+  ) => void;
+  success: (message: string, opts?: ToastOptions) => void;
+  error: (message: string, opts?: ToastOptions) => void;
+  info: (message: string, opts?: ToastOptions) => void;
 }
+
+/** Auto-dismiss for action toasts — long enough to read "Undo" and react. */
+const ACTION_TOAST_TTL = 8000;
 
 const ToastContext = createContext<ToastApi | null>(null);
 
@@ -58,9 +76,24 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const show = useCallback(
-    (message: string, variant: ToastVariant = "info", ttl = 3500) => {
+    (
+      message: string,
+      variant: ToastVariant = "info",
+      optsOrTtl?: number | ToastOptions,
+    ) => {
+      const opts: ToastOptions =
+        typeof optsOrTtl === "number"
+          ? { ttl: optsOrTtl }
+          : optsOrTtl ?? {};
+      // Toasts with an action need extra dwell time so the user can read
+      // and click "Undo" before the toast disappears.
+      const ttl =
+        opts.ttl ?? (opts.action ? ACTION_TOAST_TTL : 3500);
       const id = ++idRef.current;
-      setToasts((cur) => [...cur, { id, message, variant, ttl }]);
+      setToasts((cur) => [
+        ...cur,
+        { id, message, variant, ttl, action: opts.action },
+      ]);
       if (ttl > 0) {
         setTimeout(() => dismiss(id), ttl);
       }
@@ -71,9 +104,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const toast = useMemo<ToastApi>(
     () => ({
       show,
-      success: (m, t) => show(m, "success", t),
-      error: (m, t) => show(m, "error", t ?? 6000),
-      info: (m, t) => show(m, "info", t),
+      success: (m, opts) => show(m, "success", opts),
+      error: (m, opts) =>
+        show(m, "error", {
+          ttl: opts?.ttl ?? (opts?.action ? ACTION_TOAST_TTL : 6000),
+          action: opts?.action,
+        }),
+      info: (m, opts) => show(m, "info", opts),
     }),
     [show],
   );
@@ -186,6 +223,17 @@ function ToastItem({
         {icon}
       </span>
       <div className="flex-1 text-sm leading-snug pt-0.5">{toast.message}</div>
+      {toast.action && (
+        <button
+          onClick={() => {
+            toast.action!.onClick();
+            onDismiss();
+          }}
+          className="shrink-0 self-center border-[1.5px] border-ink bg-paper hover:bg-ink hover:text-paper px-2 h-6 font-mono text-[10px] uppercase tracking-widest transition-colors"
+        >
+          {toast.action.label}
+        </button>
+      )}
       <button
         onClick={onDismiss}
         aria-label="Dismiss notification"

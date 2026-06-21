@@ -17,8 +17,12 @@ import {
   removeLabel,
   removeSnapshot,
   removeUser,
+  restorePost,
+  restoreProject,
+  restoreTask,
   setCurrentUser,
   setTheme,
+  snapshotProject,
   updatePost,
   updateProject,
   updateTask,
@@ -793,5 +797,114 @@ describe("createTask sequential numbering", () => {
       s = r.state;
     }
     assert.deepEqual(numbers, [before, before + 1, before + 2, before + 3, before + 4]);
+  });
+});
+
+// ── Undo / restore ─────────────────────────────────────────────────────────
+//
+// These guard the ADHD-UX "undo a destructive click" path. One mis-click on
+// a project would otherwise wipe every child task with no way back.
+
+describe("restoreProject", () => {
+  it("brings back the project AND all N cascaded tasks with IDs intact", () => {
+    const s0 = fresh();
+    const project = s0.projects.find((p) =>
+      s0.tasks.some((t) => t.projectId === p.id),
+    )!;
+    const childTasks = s0.tasks.filter((t) => t.projectId === project.id);
+    assert.ok(childTasks.length > 0, "fixture must have child tasks");
+
+    const snapshot = snapshotProject(s0, project.id)!;
+    assert.equal(snapshot.tasks.length, childTasks.length);
+
+    const deleted = deleteProject(s0, project.id);
+    const restored = restoreProject(deleted, snapshot);
+
+    // Project is back, same ID + timestamps.
+    const back = restored.projects.find((p) => p.id === project.id);
+    assert.ok(back, "project should be restored");
+    assert.equal(back!.id, project.id);
+    assert.equal(back!.createdAt, project.createdAt);
+    assert.equal(back!.nextTaskNumber, project.nextTaskNumber);
+
+    // Every child task is back with original IDs intact.
+    const backTaskIds = new Set(
+      restored.tasks.filter((t) => t.projectId === project.id).map((t) => t.id),
+    );
+    for (const t of childTasks) {
+      assert.ok(backTaskIds.has(t.id), `task ${t.id} should be restored`);
+    }
+    assert.equal(backTaskIds.size, childTasks.length);
+  });
+
+  it("is a no-op if the project is already present (no duplicate IDs)", () => {
+    const s0 = fresh();
+    const project = s0.projects[0];
+    const snapshot = snapshotProject(s0, project.id)!;
+    const restored = restoreProject(s0, snapshot);
+    const matching = restored.projects.filter((p) => p.id === project.id);
+    assert.equal(matching.length, 1);
+  });
+
+  it("leaves unrelated tasks untouched", () => {
+    const s0 = fresh();
+    const target = s0.projects[0];
+    const snapshot = snapshotProject(s0, target.id)!;
+    const deleted = deleteProject(s0, target.id);
+    const otherIds = deleted.tasks.map((t) => t.id).sort();
+    const restored = restoreProject(deleted, snapshot);
+    const stillThere = restored.tasks
+      .filter((t) => t.projectId !== target.id)
+      .map((t) => t.id)
+      .sort();
+    assert.deepEqual(stillThere, otherIds);
+  });
+});
+
+describe("restoreTask", () => {
+  it("brings back the deleted task with original ID and activity intact", () => {
+    const s0 = fresh();
+    const task = s0.tasks[0];
+    const deleted = deleteTask(s0, task.id);
+    assert.ok(!deleted.tasks.find((t) => t.id === task.id));
+
+    const restored = restoreTask(deleted, task);
+    const back = restored.tasks.find((t) => t.id === task.id);
+    assert.ok(back, "task should be restored");
+    assert.equal(back!.id, task.id);
+    assert.equal(back!.createdAt, task.createdAt);
+    assert.deepEqual(back!.activity, task.activity);
+  });
+
+  it("is a no-op if a task with the same ID already exists", () => {
+    const s0 = fresh();
+    const task = s0.tasks[0];
+    const restored = restoreTask(s0, task);
+    const matching = restored.tasks.filter((t) => t.id === task.id);
+    assert.equal(matching.length, 1);
+  });
+});
+
+describe("restorePost", () => {
+  it("brings back the deleted post with snapshots and timestamps intact", () => {
+    const s0 = fresh();
+    const post = s0.posts[0];
+    const deleted = deletePost(s0, post.id);
+    assert.ok(!deleted.posts.find((p) => p.id === post.id));
+
+    const restored = restorePost(deleted, post);
+    const back = restored.posts.find((p) => p.id === post.id);
+    assert.ok(back, "post should be restored");
+    assert.equal(back!.id, post.id);
+    assert.equal(back!.createdAt, post.createdAt);
+    assert.deepEqual(back!.snapshots, post.snapshots);
+  });
+
+  it("is a no-op if a post with the same ID already exists", () => {
+    const s0 = fresh();
+    const post = s0.posts[0];
+    const restored = restorePost(s0, post);
+    const matching = restored.posts.filter((p) => p.id === post.id);
+    assert.equal(matching.length, 1);
   });
 });
