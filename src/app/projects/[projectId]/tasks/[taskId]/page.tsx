@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
@@ -10,6 +10,8 @@ import { StatusPicker } from "@/components/pickers/StatusPicker";
 import { PriorityPicker } from "@/components/pickers/PriorityPicker";
 import { AssigneePicker } from "@/components/pickers/AssigneePicker";
 import { LabelPicker } from "@/components/pickers/LabelPicker";
+import { SaveIndicator, type SaveState } from "@/components/SaveIndicator";
+import { debounce, type Debounced } from "@/lib/autosave";
 import { useStore } from "@/lib/store";
 import { Avatar } from "@/components/ui/Avatar";
 import {
@@ -20,6 +22,8 @@ import {
 } from "@/lib/utils";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { useConfirm, useToast } from "@/components/ToastProvider";
+
+const AUTOSAVE_DEBOUNCE_MS = 600;
 
 export default function TaskDetailPage() {
   const { projectId, taskId } = useParams<{
@@ -42,13 +46,74 @@ export default function TaskDetailPage() {
   const [title, setTitle] = useState(task?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
   const [comment, setComment] = useState("");
+  const [saveState, setSaveState] = useState<SaveState>("saved");
 
+  // Hold the debounced autosave in a ref so closure identity is stable across
+  // renders and the useEffect cleanup can flush synchronously on unmount.
+  const debouncedRef = useRef<Debounced<
+    [{ title: string; description: string }]
+  > | null>(null);
+
+  // When the underlying task changes from elsewhere (e.g. another tab, or the
+  // initial hydration) sync local edits — but only if there is no in-flight
+  // edit pending. Otherwise a save round-trip could clobber the user's typing.
   useEffect(() => {
-    if (task) {
-      setTitle(task.title);
-      setDescription(task.description);
+    if (!task) return;
+    setTitle(task.title);
+    setDescription(task.description);
+    // Intentionally only resync when the task identity changes, not on every
+    // updatedAt bump — that would fight the user's typing. The flush itself
+    // happens before any external update lands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id]);
+
+  // (Re)build the debounced saver whenever the target task or updater changes.
+  // The cleanup flushes any pending write — this is the load-bearing piece
+  // that makes "close tab mid-thought" safe.
+  useEffect(() => {
+    if (!task) return;
+    const d = debounce(
+      (next: { title: string; description: string }) => {
+        const patch: { title?: string; description?: string } = {};
+        const trimmedTitle = next.title.trim();
+        if (trimmedTitle && trimmedTitle !== task.title) {
+          patch.title = trimmedTitle;
+        }
+        if (next.description !== task.description) {
+          patch.description = next.description;
+        }
+        if (Object.keys(patch).length > 0) {
+          updateTask(task.id, patch);
+        }
+        setSaveState("saved");
+      },
+      AUTOSAVE_DEBOUNCE_MS,
+    );
+    debouncedRef.current = d;
+    return () => {
+      d.flush();
+    };
+  }, [task, updateTask]);
+
+  // Whenever an editable field changes, mark dirty and (re)arm the debounce.
+  const scheduleSave = (next: { title: string; description: string }) => {
+    if (!task) return;
+    const trimmedTitle = next.title.trim();
+    const dirty =
+      (trimmedTitle && trimmedTitle !== task.title) ||
+      next.description !== task.description;
+    if (!dirty) {
+      // Edit landed back on the saved value (e.g. undo); drop the pending
+      // write so we don't flip the indicator to "saving" for a no-op.
+      debouncedRef.current?.cancel();
+      setSaveState("saved");
+      return;
     }
-  }, [task]);
+    setSaveState("saving");
+    debouncedRef.current?.call(next);
+  };
+
+  const flushNow = () => debouncedRef.current?.flush();
 
   if (!hydrated) return null;
   // Guard: the taskId path segment must belong to the project in the URL.
@@ -65,16 +130,6 @@ export default function TaskDetailPage() {
       </div>
     );
   }
-
-  const titleChanged = title !== task.title;
-  const descChanged = description !== task.description;
-
-  const saveTitle = () => {
-    if (titleChanged && title.trim()) updateTask(task.id, { title: title.trim() });
-  };
-  const saveDesc = () => {
-    if (descChanged) updateTask(task.id, { description });
-  };
 
   const assignee = users.find((u) => u.id === task.assigneeId);
   const taskLabels = labels.filter((l) => task.labelIds.includes(l.id));
@@ -102,26 +157,29 @@ export default function TaskDetailPage() {
           </span>
         }
         trailing={
-          <Button
-            variant="ghost"
-            size="sm"
-            iconLeft={<Trash2 size={12} />}
-            onClick={async () => {
-              const ok = await confirm({
-                title: "Delete task",
-                message: `${project.key}-${task.number} will be removed. This can't be undone.`,
-                confirmLabel: "Delete task",
-                destructive: true,
-              });
-              if (ok) {
-                deleteTask(task.id);
-                toast.success("Task deleted");
-                router.push(`/projects/${project.id}`);
-              }
-            }}
-          >
-            Delete
-          </Button>
+          <>
+            <SaveIndicator state={saveState} lastSavedAt={task.updatedAt} />
+            <Button
+              variant="ghost"
+              size="sm"
+              iconLeft={<Trash2 size={12} />}
+              onClick={async () => {
+                const ok = await confirm({
+                  title: "Delete task",
+                  message: `${project.key}-${task.number} will be removed. This can't be undone.`,
+                  confirmLabel: "Delete task",
+                  destructive: true,
+                });
+                if (ok) {
+                  deleteTask(task.id);
+                  toast.success("Task deleted");
+                  router.push(`/projects/${project.id}`);
+                }
+              }}
+            >
+              Delete
+            </Button>
+          </>
         }
       />
 
@@ -130,8 +188,12 @@ export default function TaskDetailPage() {
           <Label>Title</Label>
           <Input
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={saveTitle}
+            onChange={(e) => {
+              const v = e.target.value;
+              setTitle(v);
+              scheduleSave({ title: v, description });
+            }}
+            onBlur={flushNow}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 (e.target as HTMLInputElement).blur();
@@ -145,15 +207,14 @@ export default function TaskDetailPage() {
             <Textarea
               rows={10}
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              onBlur={saveDesc}
+              onChange={(e) => {
+                const v = e.target.value;
+                setDescription(v);
+                scheduleSave({ title, description: v });
+              }}
+              onBlur={flushNow}
               placeholder="Write context, acceptance criteria, links…"
             />
-            {descChanged && (
-              <div className="mt-1 font-mono text-[10px] uppercase tracking-widest text-ink/50">
-                Unsaved — click away to save
-              </div>
-            )}
           </div>
 
           <div className="mt-6">
