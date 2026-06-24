@@ -222,3 +222,11 @@ export const SCORE_BANDS: { id: ScoreBand; label: string; min: number }[] = [
   { id: "hot", label: "Hot", min: 75 },
   { id: "rocket", label: "Rocket", min: 88 },
 ];
+
+// Statuses that count as "scored" for dashboards and reports: posts that
+// are out in the world and accumulating engagement. Adding a new status
+// here (e.g. "promoting") propagates to every consumer in one edit.
+export const LIVE_POST_STATUSES: ReadonlySet<PostStatus> = new Set([
+  "live",
+  "analyzing",
+]);

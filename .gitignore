@@ -16,3 +16,5 @@ playwright-results.json
 src-tauri/target
 src-tauri/gen
 src-tauri/Cargo.lock
+.claude
+
