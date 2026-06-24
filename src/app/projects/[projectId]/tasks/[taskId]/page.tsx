@@ -55,18 +55,29 @@ export default function TaskDetailPage() {
     [{ title: string; description: string }]
   > | null>(null);
 
-  // When the underlying task changes from elsewhere (e.g. another tab, or the
-  // initial hydration) sync local edits — but only if there is no in-flight
-  // edit pending. Otherwise a save round-trip could clobber the user's typing.
+  // Sync local edits to the canonical task when:
+  //   • the task identity changes (navigated to a different task)
+  //   • hydration completes (initial render seeded local state from the
+  //     pre-hydration store; once persisted data lands we adopt it)
+  //   • title / description change on the canonical task and we are NOT
+  //     mid-edit (another tab updated this task, or the just-fired save
+  //     normalized whitespace/trimming).
+  //
+  // The `saveState === "saving"` guard prevents an external write from
+  // clobbering the user's in-flight typing — the user's debounced save
+  // still wins. Without `task?.title` / `task?.description` in deps a
+  // hydration that swaps to a same-id-but-different-content task left
+  // local state stale, and the next autosave would write the seeded
+  // values back over the persisted edits.
   useEffect(() => {
     if (!task) return;
+    if (saveState === "saving") return;
     setTitle(task.title);
     setDescription(task.description);
-    // Intentionally only resync when the task identity changes, not on every
-    // updatedAt bump — that would fight the user's typing. The flush itself
-    // happens before any external update lands.
+    // saveState is intentionally read-only here, not a dep: we don't want
+    // a saved→saving transition to fire this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.id]);
+  }, [task?.id, task?.title, task?.description, hydrated]);
 
   // (Re)build the debounced saver whenever the target task or updater changes.
   // The cleanup flushes any pending write — this is the load-bearing piece
