@@ -167,6 +167,49 @@ export function deleteProject(
   };
 }
 
+/**
+ * Snapshot captured at delete-time so the caller can offer "Undo".
+ * Holds the project plus every task that cascaded with it.
+ */
+export interface ProjectSnapshot {
+  project: Project;
+  tasks: Task[];
+}
+
+/** Capture a project + its cascaded children. Returns undefined if no such project. */
+export function snapshotProject(
+  state: WorkspaceState,
+  id: string,
+): ProjectSnapshot | undefined {
+  const project = state.projects.find((p) => p.id === id);
+  if (!project) return undefined;
+  const tasks = state.tasks.filter((t) => t.projectId === id);
+  return { project, tasks };
+}
+
+/**
+ * Re-insert a project AND its cascaded tasks, preserving original IDs,
+ * timestamps, and `nextTaskNumber`. Safe to call only when the project
+ * isn't already present — duplicate IDs would corrupt the workspace.
+ */
+export function restoreProject(
+  state: WorkspaceState,
+  snapshot: ProjectSnapshot,
+): WorkspaceState {
+  if (state.projects.some((p) => p.id === snapshot.project.id)) {
+    return state;
+  }
+  const existingTaskIds = new Set(state.tasks.map((t) => t.id));
+  const tasksToRestore = snapshot.tasks.filter(
+    (t) => !existingTaskIds.has(t.id),
+  );
+  return {
+    ...state,
+    projects: [snapshot.project, ...state.projects],
+    tasks: [...tasksToRestore, ...state.tasks],
+  };
+}
+
 // ── Tasks ───────────────────────────────────────────────────────────────────
 
 /**
@@ -299,6 +342,18 @@ export function deleteTask(
   return { ...state, tasks: state.tasks.filter((t) => t.id !== id) };
 }
 
+/**
+ * Re-insert a previously-deleted task, preserving its original ID and
+ * timestamps. No-op if the task is already present.
+ */
+export function restoreTask(
+  state: WorkspaceState,
+  snapshot: Task,
+): WorkspaceState {
+  if (state.tasks.some((t) => t.id === snapshot.id)) return state;
+  return { ...state, tasks: [snapshot, ...state.tasks] };
+}
+
 export function moveTaskStatus(
   state: WorkspaceState,
   id: string,
@@ -415,6 +470,18 @@ export function deletePost(
   id: string,
 ): WorkspaceState {
   return { ...state, posts: state.posts.filter((p) => p.id !== id) };
+}
+
+/**
+ * Re-insert a previously-deleted post, preserving its original ID and
+ * timestamps. No-op if the post is already present.
+ */
+export function restorePost(
+  state: WorkspaceState,
+  snapshot: Post,
+): WorkspaceState {
+  if (state.posts.some((p) => p.id === snapshot.id)) return state;
+  return { ...state, posts: [snapshot, ...state.posts] };
 }
 
 export function duplicatePost(

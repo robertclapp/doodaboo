@@ -38,6 +38,7 @@ export default function TaskDetailPage() {
   const labels = useStore((s) => s.labels);
   const updateTask = useStore((s) => s.updateTask);
   const deleteTask = useStore((s) => s.deleteTask);
+  const restoreTask = useStore((s) => s.restoreTask);
   const addComment = useStore((s) => s.addComment);
   const hydrated = useStore((s) => s.hydrated);
   const confirm = useConfirm();
@@ -166,13 +167,21 @@ export default function TaskDetailPage() {
               onClick={async () => {
                 const ok = await confirm({
                   title: "Delete task",
-                  message: `${project.key}-${task.number} will be removed. This can't be undone.`,
+                  message: `${project.key}-${task.number} will be removed.`,
                   confirmLabel: "Delete task",
                   destructive: true,
                 });
                 if (ok) {
+                  // Snapshot BEFORE delete so Undo restores the exact
+                  // task, ID and activity history intact.
+                  const snapshot = task;
                   deleteTask(task.id);
-                  toast.success("Task deleted");
+                  toast.success(`Deleted ${project.key}-${task.number}`, {
+                    action: {
+                      label: "Undo",
+                      onClick: () => restoreTask(snapshot),
+                    },
+                  });
                   router.push(`/projects/${project.id}`);
                 }
               }}

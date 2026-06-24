@@ -27,9 +27,13 @@ import {
   duplicatePost as duplicatePostMut,
   emptyWorkspace,
   moveTaskStatus as moveTaskStatusMut,
+  ProjectSnapshot,
   removeLabel as removeLabelMut,
   removeSnapshot as removeSnapshotMut,
   removeUser as removeUserMut,
+  restorePost as restorePostMut,
+  restoreProject as restoreProjectMut,
+  restoreTask as restoreTaskMut,
   setCurrentUser as setCurrentUserMut,
   setTheme as setThemeMut,
   Theme,
@@ -39,6 +43,8 @@ import {
   WorkspaceState,
   WORKSPACE_VERSION,
 } from "./mutations";
+
+export type { ProjectSnapshot } from "./mutations";
 
 export type { Theme } from "./mutations";
 
@@ -76,18 +82,21 @@ interface StoreState extends WorkspaceState {
   ) => Project;
   updateProject: (id: string, patch: Partial<Project>) => void;
   deleteProject: (id: string) => void;
+  restoreProject: (snapshot: ProjectSnapshot) => void;
 
   createTask: (
     data: Partial<Task> & Pick<Task, "projectId" | "title">,
   ) => Task;
   updateTask: (id: string, patch: Partial<Task>) => void;
   deleteTask: (id: string) => void;
+  restoreTask: (snapshot: Task) => void;
   moveTaskStatus: (id: string, status: Status) => void;
   addComment: (taskId: string, body: string) => Comment | undefined;
 
   createPost: (data: Partial<Post> & Pick<Post, "title" | "platform">) => Post;
   updatePost: (id: string, patch: Partial<Post>) => void;
   deletePost: (id: string) => void;
+  restorePost: (snapshot: Post) => void;
   duplicatePost: (
     id: string,
     opts?: { titleSuffix?: string },
@@ -186,12 +195,16 @@ export const useStore = create<StoreState>()(
       updateProject: (id, patch) =>
         apply(set, get, (s) => updateProjectMut(s, id, patch)),
       deleteProject: (id) => apply(set, get, (s) => deleteProjectMut(s, id)),
+      restoreProject: (snapshot) =>
+        apply(set, get, (s) => restoreProjectMut(s, snapshot)),
 
       createTask: (data) =>
         applyAnd(set, get, (s) => createTaskAdapter(s, data)),
       updateTask: (id, patch) =>
         apply(set, get, (s) => updateTaskMut(s, id, patch)),
       deleteTask: (id) => apply(set, get, (s) => deleteTaskMut(s, id)),
+      restoreTask: (snapshot) =>
+        apply(set, get, (s) => restoreTaskMut(s, snapshot)),
       moveTaskStatus: (id, status) =>
         apply(set, get, (s) => moveTaskStatusMut(s, id, status)),
       addComment: (taskId, body) => {
@@ -205,6 +218,8 @@ export const useStore = create<StoreState>()(
       updatePost: (id, patch) =>
         apply(set, get, (s) => updatePostMut(s, id, patch)),
       deletePost: (id) => apply(set, get, (s) => deletePostMut(s, id)),
+      restorePost: (snapshot) =>
+        apply(set, get, (s) => restorePostMut(s, snapshot)),
       duplicatePost: (id, opts) => {
         const r = duplicatePostMut(extract(get()), id, opts);
         set(r.state as Partial<StoreState>);
