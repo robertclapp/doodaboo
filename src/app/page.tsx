@@ -1,15 +1,18 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useStore } from "@/lib/store";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusIcon } from "@/components/StatusIcon";
 import { PriorityIcon } from "@/components/PriorityIcon";
 import { Avatar, AvatarStack } from "@/components/ui/Avatar";
+import { DueBadge } from "@/components/DueBadge";
 import { STATUSES } from "@/lib/types";
 import { formatDateShort, timeAgo } from "@/lib/utils";
+import { buildMyDay } from "@/lib/myDay";
 import { Button } from "@/components/ui/Button";
-import { ArrowRight, Plus, Sparkles } from "lucide-react";
+import { ArrowRight, Crosshair, Plus, Sparkles, X } from "lucide-react";
 import { PlatformIcon } from "@/components/posts/PlatformIcon";
 import { describeBand, scoreIntrinsic, scoreLive } from "@/lib/virality";
 
@@ -23,12 +26,100 @@ export default function HomePage() {
   );
   const hydrated = useStore((s) => s.hydrated);
 
+  // Focus mode is intentionally local-only: it's a "calm the page down right
+  // now" affordance, not something the user needs to deep-link to or that
+  // should survive a reload. A query-param dance here would be friction.
+  const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
+
   if (!hydrated) return <Skeleton />;
 
   const open = tasks.filter(
     (t) => t.status !== "done" && t.status !== "cancelled",
   );
   const mine = open.filter((t) => t.assigneeId === currentUser?.id);
+  const myDay = buildMyDay(tasks, currentUser?.id);
+
+  const focused = focusedTaskId
+    ? tasks.find((t) => t.id === focusedTaskId)
+    : null;
+
+  // Focus mode: render ONLY the focused task plus an escape hatch. Hiding
+  // workload counters / lists / posts is the whole point — single next
+  // action, nothing else competing for attention.
+  if (focused) {
+    const proj = projects.find((p) => p.id === focused.projectId);
+    const assignee = users.find((u) => u.id === focused.assigneeId);
+    return (
+      <>
+        <PageHeader
+          kicker="Focus"
+          title={<span>One thing at a time</span>}
+          trailing={
+            <Button
+              variant="outline"
+              iconLeft={<X size={12} />}
+              onClick={() => setFocusedTaskId(null)}
+            >
+              Show everything
+            </Button>
+          }
+        />
+        <div className="p-4">
+          <section className="border-[1.5px] border-ink bg-paper">
+            <div className="h-9 border-b-[1.5px] border-ink px-3 flex items-center justify-between">
+              <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-widest font-bold">
+                <PriorityIcon priority={focused.priority} />
+                <StatusIcon status={focused.status} size={14} />
+                <span>
+                  {proj?.key}-{focused.number}
+                </span>
+              </div>
+              <DueBadge iso={focused.dueDate} />
+            </div>
+            <div className="p-6 flex flex-col gap-4">
+              <h2 className="text-2xl font-bold leading-tight">
+                {focused.title}
+              </h2>
+              {focused.description && (
+                <p className="text-sm text-ink/80 whitespace-pre-wrap leading-relaxed">
+                  {focused.description}
+                </p>
+              )}
+              <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-widest text-ink/60">
+                {proj && (
+                  <Link
+                    href={`/projects/${proj.id}`}
+                    className="inline-flex items-center gap-1 hover:text-ink"
+                  >
+                    <span
+                      className="w-4 h-4 inline-flex items-center justify-center border-[1.5px] border-ink text-[9px] font-bold"
+                      style={{ backgroundColor: proj.accent }}
+                    >
+                      {proj.icon}
+                    </span>
+                    {proj.name}
+                  </Link>
+                )}
+                {assignee && (
+                  <span className="inline-flex items-center gap-1">
+                    <Avatar user={assignee} size={14} />
+                    {assignee.name}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 pt-2">
+                <Link href={`/projects/${focused.projectId}/tasks/${focused.id}`}>
+                  <Button variant="accent" iconRight={<ArrowRight size={12} />}>
+                    Open task
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </section>
+        </div>
+      </>
+    );
+  }
 
   const statusCounts = STATUSES.map((s) => ({
     ...s,
@@ -57,6 +148,59 @@ export default function HomePage() {
       />
 
       <div className="p-4 grid grid-cols-12 gap-4">
+        <section
+          aria-label="My Day"
+          className="col-span-12 border-[1.5px] border-ink bg-paper"
+        >
+          <div className="h-9 border-b-[1.5px] border-ink px-3 flex items-center justify-between">
+            <div className="font-mono text-[11px] uppercase tracking-widest font-bold">
+              My Day · top {myDay.length} by priority + due
+            </div>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-ink/50">
+              {currentUser?.name ?? "—"}
+            </span>
+          </div>
+          <ul>
+            {myDay.map((t) => {
+              const proj = projects.find((p) => p.id === t.projectId);
+              return (
+                <li
+                  key={t.id}
+                  className="grid grid-cols-[auto_auto_auto_1fr_auto_auto] items-center gap-2 px-3 h-10 border-b-[1.5px] border-ink/10 last:border-b-0 hover:bg-ink/[0.03]"
+                >
+                  <StatusIcon status={t.status} size={14} />
+                  <PriorityIcon priority={t.priority} />
+                  <span className="font-mono text-[10px] text-ink/50 tabular-nums">
+                    {proj?.key}-{t.number}
+                  </span>
+                  <Link
+                    href={`/projects/${t.projectId}/tasks/${t.id}`}
+                    className="truncate text-sm hover:underline"
+                  >
+                    {t.title}
+                  </Link>
+                  <DueBadge iso={t.dueDate} />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    iconLeft={<Crosshair size={11} />}
+                    onClick={() => setFocusedTaskId(t.id)}
+                    aria-label={`Focus on ${t.title}`}
+                    title="Hide everything else and focus on this"
+                  >
+                    Focus
+                  </Button>
+                </li>
+              );
+            })}
+            {myDay.length === 0 && (
+              <li className="px-3 py-6 text-xs text-ink/50 font-mono uppercase tracking-widest">
+                Nothing active for today — pick something from below, or rest.
+              </li>
+            )}
+          </ul>
+        </section>
+
         <section className="col-span-12 border-[1.5px] border-ink bg-paper">
           <div className="h-9 border-b-[1.5px] border-ink px-3 flex items-center justify-between">
             <div className="font-mono text-[11px] uppercase tracking-widest font-bold">
@@ -92,7 +236,7 @@ export default function HomePage() {
         <section className="col-span-12 lg:col-span-7 border-[1.5px] border-ink bg-paper">
           <div className="h-9 border-b-[1.5px] border-ink px-3 flex items-center justify-between">
             <div className="font-mono text-[11px] uppercase tracking-widest font-bold">
-              Your open issues · {mine.length}
+              All my open issues · {mine.length}
             </div>
           </div>
           <ul>
