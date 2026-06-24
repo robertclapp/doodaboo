@@ -65,19 +65,18 @@ export default function TaskDetailPage() {
   //
   // The `saveState === "saving"` guard prevents an external write from
   // clobbering the user's in-flight typing — the user's debounced save
-  // still wins. Without `task?.title` / `task?.description` in deps a
-  // hydration that swaps to a same-id-but-different-content task left
-  // local state stale, and the next autosave would write the seeded
-  // values back over the persisted edits.
+  // still wins. `saveState` IS a dep: when the user navigates away
+  // mid-save, the saver effect's cleanup flushes the pending write and
+  // flips saveState back to "saved", which re-fires this effect so the
+  // new task's title/description gets adopted (without it the new task
+  // would render with the previous task's edited content, and the next
+  // autosave would clobber the new task with the old one's text).
   useEffect(() => {
     if (!task) return;
     if (saveState === "saving") return;
     setTitle(task.title);
     setDescription(task.description);
-    // saveState is intentionally read-only here, not a dep: we don't want
-    // a saved→saving transition to fire this effect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.id, task?.title, task?.description, hydrated]);
+  }, [task?.id, task?.title, task?.description, hydrated, saveState]);
 
   // (Re)build the debounced saver whenever the target task or updater changes.
   // The cleanup flushes any pending write — this is the load-bearing piece
