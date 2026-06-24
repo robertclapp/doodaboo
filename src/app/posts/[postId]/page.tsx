@@ -8,6 +8,7 @@ import { useConfirm, useToast } from "@/components/ToastProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { SaveIndicator } from "@/components/SaveIndicator";
 import { PostComposer } from "@/components/posts/PostComposer";
 import { ScoreGauge } from "@/components/posts/ScoreGauge";
 import { FactorTable } from "@/components/posts/FactorTable";
@@ -310,18 +311,6 @@ function fmt(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
-}
-
-function SaveIndicator({ at }: { at: number | null }) {
-  return (
-    <span
-      className="font-mono text-[10px] uppercase tracking-widest text-ink/50 transition-opacity duration-300"
-      style={{ opacity: at ? 1 : 0 }}
-      aria-live="polite"
-    >
-      ● Saved
-    </span>
-  );
 }
 
 function SchedulePicker({

@@ -11,7 +11,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css,md,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,md,json}\"",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx src/lib/api.test.ts src/lib/hooks-generator.test.ts src/lib/mutations.test.ts src/lib/playbooks.test.ts src/lib/seed.test.ts src/lib/tauri-storage.test.ts src/lib/utils.test.ts src/lib/vault.test.ts src/lib/virality.test.ts src/app/api/api.test.ts cli/util.test.ts cli/commands/dash.test.ts cli/commands/report.test.ts",
+    "test": "node --test --import tsx src/lib/api.test.ts src/lib/autosave.test.ts src/lib/hooks-generator.test.ts src/lib/mutations.test.ts src/lib/playbooks.test.ts src/lib/seed.test.ts src/lib/tauri-storage.test.ts src/lib/utils.test.ts src/lib/vault.test.ts src/lib/virality.test.ts src/app/api/api.test.ts cli/util.test.ts cli/commands/dash.test.ts cli/commands/report.test.ts",
     "test:cli": "node --test --import tsx cli/cli.test.ts",
     "test:all": "npm test && npm run test:cli",
     "e2e": "playwright test",
