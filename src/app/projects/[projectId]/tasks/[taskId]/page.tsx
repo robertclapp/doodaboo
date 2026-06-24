@@ -76,6 +76,10 @@ export default function TaskDetailPage() {
     if (saveState === "saving") return;
     setTitle(task.title);
     setDescription(task.description);
+    // We pin the three task fields we read individually, not the whole
+    // task object — depending on task itself would trigger this on every
+    // updatedAt bump even when nothing we care about changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task?.id, task?.title, task?.description, hydrated, saveState]);
 
   // (Re)build the debounced saver whenever the target task or updater changes.
