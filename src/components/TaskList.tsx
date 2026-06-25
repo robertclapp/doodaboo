@@ -154,7 +154,7 @@ function TaskListInner({
               >
                 {t.type === "issue" ? "[ISSUE] " : ""}
               </span>
-              {t.title}
+              {t.title || "Untitled task"}
             </Link>
 
             <LabelPicker

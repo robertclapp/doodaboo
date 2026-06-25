@@ -91,7 +91,7 @@ export function KanbanBoard({ tasks }: { tasks: Task[] }) {
                             [ISSUE]
                           </span>
                         )}
-                        {t.title}
+                        {t.title || "Untitled task"}
                       </div>
                       {tLabels.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-1">

@@ -177,7 +177,7 @@ export default function HomePage() {
                     href={`/projects/${t.projectId}/tasks/${t.id}`}
                     className="truncate text-sm hover:underline"
                   >
-                    {t.title}
+                    {t.title || "Untitled task"}
                   </Link>
                   <DueBadge iso={t.dueDate} />
                   <Button
@@ -185,7 +185,7 @@ export default function HomePage() {
                     size="sm"
                     iconLeft={<Crosshair size={11} />}
                     onClick={() => setFocusedTaskId(t.id)}
-                    aria-label={`Focus on ${t.title}`}
+                    aria-label={`Focus on ${t.title || "Untitled task"}`}
                     title="Hide everything else and focus on this"
                   >
                     Focus
@@ -256,7 +256,7 @@ export default function HomePage() {
                     href={`/projects/${t.projectId}/tasks/${t.id}`}
                     className="truncate text-sm hover:underline"
                   >
-                    {t.title}
+                    {t.title || "Untitled task"}
                   </Link>
                   <span className="font-mono text-[10px] uppercase tracking-wider text-ink/50">
                     {formatDateShort(t.updatedAt)}
@@ -414,7 +414,7 @@ export default function HomePage() {
                     href={`/projects/${t.projectId}/tasks/${t.id}`}
                     className="truncate text-sm hover:underline"
                   >
-                    {t.title}
+                    {t.title || "Untitled task"}
                   </Link>
                   <Avatar user={a} size={16} />
                   <span className="font-mono text-[10px] uppercase tracking-wider text-ink/50">

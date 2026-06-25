@@ -238,7 +238,7 @@ export function CommandPalette({
         const p = projects.find((x) => x.id === t.projectId);
         return {
           id: `task_${t.id}`,
-          label: t.title,
+          label: t.title || "Untitled task",
           hint: p ? `${p.key}-${t.number}` : undefined,
           group: "Tasks",
           icon: <ArrowRight size={12} />,
