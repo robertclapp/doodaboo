@@ -9,16 +9,18 @@ export type SaveState = "saved" | "saving" | "dirty";
  * Visible autosave status pill. The "Unsaved — click away to save" hint that
  * used to live on the task detail page was an ADHD trap: if you closed the
  * tab or navigated away mid-thought, the not-yet-blurred field was silently
- * dropped. Pair this component with a real debounced autosave (see
- * src/app/projects/[projectId]/tasks/[taskId]/page.tsx) so users always have
- * a concrete signal that their text is on disk.
+ * dropped. Both the task and post detail pages now write through to the
+ * store on every change and use this component in flash-on-save mode to
+ * confirm persistence — `at` ticks each time the canonical `updatedAt`
+ * changes.
  *
  * Two display modes:
  *  - Explicit: pass `state` ("saved" | "saving" | "dirty"). The pill shows
- *    "Saving…", "Unsaved", or "Saved Ns ago" accordingly.
+ *    "Saving…", "Unsaved", or "Saved Ns ago" accordingly. Use this if you
+ *    need an in-between "saving…" beat (e.g. for an async backend write).
  *  - Flash-on-save: omit `state` and pass `at` (a Date.now() millis stamp).
- *    The pill briefly shows "● Saved" and fades, matching the original post
- *    detail behavior.
+ *    The pill briefly shows "● Saved" and fades. Preferred when the write
+ *    is synchronous (zustand store) — no in-flight state to display.
  */
 export function SaveIndicator({
   state,

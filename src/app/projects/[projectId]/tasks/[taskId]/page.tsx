@@ -10,9 +10,9 @@ import { StatusPicker } from "@/components/pickers/StatusPicker";
 import { PriorityPicker } from "@/components/pickers/PriorityPicker";
 import { AssigneePicker } from "@/components/pickers/AssigneePicker";
 import { LabelPicker } from "@/components/pickers/LabelPicker";
-import { SaveIndicator, type SaveState } from "@/components/SaveIndicator";
-import { debounce, type Debounced } from "@/lib/autosave";
+import { SaveIndicator } from "@/components/SaveIndicator";
 import { useStore } from "@/lib/store";
+import { useHydrated } from "@/lib/hooks";
 import { Avatar } from "@/components/ui/Avatar";
 import {
   formatDateShort,
@@ -22,8 +22,6 @@ import {
 } from "@/lib/utils";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { useConfirm, useToast } from "@/components/ToastProvider";
-
-const AUTOSAVE_DEBOUNCE_MS = 600;
 
 export default function TaskDetailPage() {
   const { projectId, taskId } = useParams<{
@@ -40,81 +38,31 @@ export default function TaskDetailPage() {
   const deleteTask = useStore((s) => s.deleteTask);
   const restoreTask = useStore((s) => s.restoreTask);
   const addComment = useStore((s) => s.addComment);
-  const hydrated = useStore((s) => s.hydrated);
+  const hydrated = useHydrated();
   const confirm = useConfirm();
   const toast = useToast();
 
-  const [title, setTitle] = useState(task?.title ?? "");
-  const [description, setDescription] = useState(task?.description ?? "");
+  // Local draft for the new-comment textarea. (NOT a mirror of an
+  // existing task field — comments are submitted on button click.)
   const [comment, setComment] = useState("");
-  const [saveState, setSaveState] = useState<SaveState>("saved");
 
-  // Hold the debounced autosave in a ref so closure identity is stable across
-  // renders and the useEffect cleanup can flush synchronously on unmount.
-  const debouncedRef = useRef<Debounced<
-    [{ title: string; description: string }]
-  > | null>(null);
-
-  // When the underlying task changes from elsewhere (e.g. another tab, or the
-  // initial hydration) sync local edits — but only if there is no in-flight
-  // edit pending. Otherwise a save round-trip could clobber the user's typing.
+  // Flash-on-save indicator: shows briefly whenever the canonical task
+  // updatedAt changes. Mirrors the post detail page's pattern so both
+  // editor pages signal "saved" the same way.
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const lastSeenUpdate = useRef<string | undefined>(task?.updatedAt);
   useEffect(() => {
     if (!task) return;
-    setTitle(task.title);
-    setDescription(task.description);
-    // Intentionally only resync when the task identity changes, not on every
-    // updatedAt bump — that would fight the user's typing. The flush itself
-    // happens before any external update lands.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.id]);
-
-  // (Re)build the debounced saver whenever the target task or updater changes.
-  // The cleanup flushes any pending write — this is the load-bearing piece
-  // that makes "close tab mid-thought" safe.
-  useEffect(() => {
-    if (!task) return;
-    const d = debounce(
-      (next: { title: string; description: string }) => {
-        const patch: { title?: string; description?: string } = {};
-        const trimmedTitle = next.title.trim();
-        if (trimmedTitle && trimmedTitle !== task.title) {
-          patch.title = trimmedTitle;
-        }
-        if (next.description !== task.description) {
-          patch.description = next.description;
-        }
-        if (Object.keys(patch).length > 0) {
-          updateTask(task.id, patch);
-        }
-        setSaveState("saved");
-      },
-      AUTOSAVE_DEBOUNCE_MS,
-    );
-    debouncedRef.current = d;
-    return () => {
-      d.flush();
-    };
-  }, [task, updateTask]);
-
-  // Whenever an editable field changes, mark dirty and (re)arm the debounce.
-  const scheduleSave = (next: { title: string; description: string }) => {
-    if (!task) return;
-    const trimmedTitle = next.title.trim();
-    const dirty =
-      (trimmedTitle && trimmedTitle !== task.title) ||
-      next.description !== task.description;
-    if (!dirty) {
-      // Edit landed back on the saved value (e.g. undo); drop the pending
-      // write so we don't flip the indicator to "saving" for a no-op.
-      debouncedRef.current?.cancel();
-      setSaveState("saved");
-      return;
+    if (lastSeenUpdate.current && lastSeenUpdate.current !== task.updatedAt) {
+      setSavedAt(Date.now());
     }
-    setSaveState("saving");
-    debouncedRef.current?.call(next);
-  };
-
-  const flushNow = () => debouncedRef.current?.flush();
+    lastSeenUpdate.current = task.updatedAt;
+  }, [task]);
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = setTimeout(() => setSavedAt(null), 1600);
+    return () => clearTimeout(t);
+  }, [savedAt]);
 
   if (!hydrated) return null;
   // Guard: the taskId path segment must belong to the project in the URL.
@@ -154,12 +102,12 @@ export default function TaskDetailPage() {
                 Issue
               </span>
             )}
-            <span className="truncate">{task.title}</span>
+            <span className="truncate">{task.title || "Untitled task"}</span>
           </span>
         }
         trailing={
           <>
-            <SaveIndicator state={saveState} lastSavedAt={task.updatedAt} />
+            <SaveIndicator at={savedAt} />
             <Button
               variant="ghost"
               size="sm"
@@ -196,13 +144,8 @@ export default function TaskDetailPage() {
         <div className="col-span-12 lg:col-span-8 border-r-[1.5px] border-ink px-5 py-5">
           <Label>Title</Label>
           <Input
-            value={title}
-            onChange={(e) => {
-              const v = e.target.value;
-              setTitle(v);
-              scheduleSave({ title: v, description });
-            }}
-            onBlur={flushNow}
+            value={task.title}
+            onChange={(e) => updateTask(task.id, { title: e.target.value })}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 (e.target as HTMLInputElement).blur();
@@ -215,13 +158,10 @@ export default function TaskDetailPage() {
             <Label>Description</Label>
             <Textarea
               rows={10}
-              value={description}
-              onChange={(e) => {
-                const v = e.target.value;
-                setDescription(v);
-                scheduleSave({ title, description: v });
-              }}
-              onBlur={flushNow}
+              value={task.description}
+              onChange={(e) =>
+                updateTask(task.id, { description: e.target.value })
+              }
               placeholder="Write context, acceptance criteria, links…"
             />
           </div>
