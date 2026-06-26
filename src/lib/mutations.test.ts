@@ -185,6 +185,13 @@ describe("emptyWorkspace", () => {
   });
 });
 
+describe("WORKSPACE_VERSION", () => {
+  it("is the integer 1", () => {
+    assert.equal(WORKSPACE_VERSION, 1);
+    assert.equal(typeof WORKSPACE_VERSION, "number");
+  });
+});
+
 // ── New: addUser / removeUser cascades ─────────────────────────────────────
 
 describe("addUser / removeUser", () => {

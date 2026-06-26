@@ -60,6 +60,27 @@ describe("isTauri", () => {
     assert.equal(isTauri(), false);
     assert.equal(isTauri(), false);
   });
+
+  it("returns false when __TAURI_INTERNALS__ is 0 (falsy number)", () => {
+    (globalThis as any).window = { __TAURI_INTERNALS__: 0 };
+    try {
+      assert.equal(isTauri(), false);
+    } finally {
+      delete (globalThis as any).window;
+    }
+  });
+
+  it("returns false when __TAURI_INTERNALS__ is false but __TAURI__ is true (?? does not fall through on false)", () => {
+    // Nullish coalescing only falls through on null/undefined, not on a
+    // defined `false`. So Boolean(false ?? true) === Boolean(false) === false,
+    // and the __TAURI__ fallback is never consulted.
+    (globalThis as any).window = { __TAURI_INTERNALS__: false, __TAURI__: true };
+    try {
+      assert.equal(isTauri(), false);
+    } finally {
+      delete (globalThis as any).window;
+    }
+  });
 });
 
 describe("createTauriStorage", () => {
