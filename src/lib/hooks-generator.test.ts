@@ -123,6 +123,12 @@ describe("variantsForPlatform", () => {
     const tt = variantsForPlatform(v, "tiktok");
     assert.ok(!tt.find((x) => x.template.id === "everyone-wrong"));
   });
+
+  it("facebook variants are non-empty", () => {
+    const all = generateHooks({ subject: "business" });
+    const fbVariants = variantsForPlatform(all, "facebook");
+    assert.ok(fbVariants.length > 0);
+  });
 });
 
 describe("HOOK_FAMILIES", () => {
@@ -146,6 +152,10 @@ describe("HOOK_FAMILIES", () => {
   it("ids are unique", () => {
     const ids = new Set(HOOK_FAMILIES.map((f) => f.id));
     assert.equal(ids.size, HOOK_FAMILIES.length);
+  });
+
+  it("has exactly 7 families", () => {
+    assert.equal(HOOK_FAMILIES.length, 7);
   });
 });
 
@@ -202,5 +212,46 @@ describe("template content sanity", () => {
       v!.fits.slice().sort(),
       ["reels", "shorts", "tiktok"].sort(),
     );
+  });
+
+  it("list-n-things uses '3' (pick index 0)", () => {
+    const v = generateHooks({ subject: "productivity" }).find(
+      (x) => x.template.id === "list-n-things",
+    );
+    assert.ok(v);
+    assert.match(v!.hook, /^3 /);
+  });
+
+  it("list-n-things-2 uses '5' (pick index 1)", () => {
+    const v = generateHooks({ subject: "productivity" }).find(
+      (x) => x.template.id === "list-n-things-2",
+    );
+    assert.ok(v);
+    assert.match(v!.hook, /^5 /);
+  });
+
+  it("rules uses '7' (pick index 2)", () => {
+    const v = generateHooks({ subject: "productivity" }).find(
+      (x) => x.template.id === "rules",
+    );
+    assert.ok(v);
+    assert.match(v!.hook, /^7 /);
+  });
+
+  it("'x-but-y' capitalizes first char of subject", () => {
+    const v = generateHooks({ subject: "boring meetings" }).find(
+      (x) => x.template.id === "x-but-y",
+    );
+    assert.ok(v);
+    // capitalize("boring meetings") = "Boring meetings"
+    assert.match(v!.hook, /^Boring meetings/);
+  });
+
+  it("'not-what-you-think' capitalizes subject", () => {
+    const v = generateHooks({ subject: "remote work" }).find(
+      (x) => x.template.id === "not-what-you-think",
+    );
+    assert.ok(v);
+    assert.match(v!.hook, /^Remote work isn't what you think/);
   });
 });

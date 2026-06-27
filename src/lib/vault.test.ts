@@ -131,6 +131,44 @@ describe("vault", () => {
     assert.equal(numbers.length, 5);
     assert.equal(new Set(numbers).size, 5, "task numbers must be unique");
   });
+
+  it("returns correct subdirectory names relative to root", () => {
+    const root = "/tmp/test-vault";
+    const paths = vaultPaths(root);
+    assert.equal(path.basename(paths.workspaceFile), "workspace.json");
+    assert.equal(path.basename(paths.backupsDir), "backups");
+    assert.equal(path.basename(paths.pluginsDir), "plugins");
+    assert.equal(path.basename(paths.exportsDir), "exports");
+    assert.equal(path.dirname(paths.workspaceFile), path.resolve(root));
+  });
+
+  it("resolves relative root paths to absolute", () => {
+    const paths = vaultPaths("relative/path");
+    assert.ok(path.isAbsolute(paths.root), "root should be absolute");
+  });
+
+  it("returns false for a directory without workspace.json", async () => {
+    const root = await tmpVault();
+    // tmpVault creates a temp dir but doesn't call initVault
+    assert.equal(await vaultExists(root), false);
+  });
+
+  it("throws 'already exists' when vault exists and force is not set", async () => {
+    const root = await tmpVault();
+    await initVault(root, { force: true });
+    await assert.rejects(
+      initVault(root),
+      /already exists/,
+    );
+  });
+
+  it("succeeds on an already-initialised vault when force=true", async () => {
+    const root = await tmpVault();
+    await initVault(root, { force: true });
+    // Should not throw
+    await initVault(root, { force: true });
+    assert.equal(await vaultExists(root), true);
+  });
 });
 
 describe("migrate (trust boundary)", () => {

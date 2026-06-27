@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  cn,
   dueStatus,
   formatDateShort,
   initials,
@@ -71,6 +72,30 @@ describe("statusColor / priorityColor", () => {
     for (const p of ["urgent", "high", "medium", "low", "none"] as const) {
       assert.match(priorityColor(p), /^#[0-9a-f]{6}$/i, `priority=${p}`);
     }
+  });
+
+  it("in_progress is amber (#f59e0b)", () => {
+    assert.equal(statusColor("in_progress"), "#f59e0b");
+  });
+
+  it("done is green (#16a34a)", () => {
+    assert.equal(statusColor("done"), "#16a34a");
+  });
+
+  it("in_review is purple (#6b4ee4)", () => {
+    assert.equal(statusColor("in_review"), "#6b4ee4");
+  });
+
+  it("urgent is red (#dc2626)", () => {
+    assert.equal(priorityColor("urgent"), "#dc2626");
+  });
+
+  it("medium is yellow (#eab308)", () => {
+    assert.equal(priorityColor("medium"), "#eab308");
+  });
+
+  it("none is gray (#737373)", () => {
+    assert.equal(priorityColor("none"), "#737373");
   });
 });
 
@@ -171,6 +196,23 @@ describe("dueStatus", () => {
       "today",
     );
   });
+
+  it("7 days minus 1ms is still 'soon' (window upper edge is exclusive)", () => {
+    // due - now = 7d - 1ms, which is < 7d, so still inside the 'soon' window.
+    const nearlySevenDays = new Date(now + 7 * 24 * 3600_000 - 1).toISOString();
+    assert.equal(dueStatus(nearlySevenDays, now), "soon");
+  });
+
+  it("exactly 7 days is 'later' (boundary is exclusive)", () => {
+    // Source uses a strict `<`: due - now === 7d is NOT < 7d, so 'later'.
+    const exactlySevenDays = new Date(now + 7 * 24 * 3600_000).toISOString();
+    assert.equal(dueStatus(exactlySevenDays, now), "later");
+  });
+
+  it("7 days plus 1ms is 'later'", () => {
+    const justPastSevenDays = new Date(now + 7 * 24 * 3600_000 + 1).toISOString();
+    assert.equal(dueStatus(justPastSevenDays, now), "later");
+  });
 });
 
 describe("localDateInputToIso / isoToLocalDateInput", () => {
@@ -246,5 +288,31 @@ describe("utils boundary cases", () => {
   it("isoToLocalDateInput: Dec 31 round-trips correctly", () => {
     const iso = new Date(2026, 11, 31).toISOString();
     assert.equal(isoToLocalDateInput(iso), "2026-12-31");
+  });
+});
+
+describe("cn (clsx wrapper)", () => {
+  it("joins multiple class strings with a space", () => {
+    assert.equal(cn("foo", "bar"), "foo bar");
+  });
+
+  it("filters out falsy values", () => {
+    assert.equal(cn("foo", false, undefined, null, "bar"), "foo bar");
+  });
+
+  it("handles a single class string", () => {
+    assert.equal(cn("only"), "only");
+  });
+
+  it("returns empty string when all inputs are falsy", () => {
+    assert.equal(cn(false, undefined, null), "");
+  });
+
+  it("handles conditional object syntax from clsx", () => {
+    assert.equal(cn({ active: true, hidden: false }), "active");
+  });
+
+  it("handles array inputs (clsx feature)", () => {
+    assert.equal(cn(["a", "b"]), "a b");
   });
 });
