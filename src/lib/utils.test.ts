@@ -197,13 +197,19 @@ describe("dueStatus", () => {
     );
   });
 
-  it("exactly 7 days from now is still 'soon' (< boundary)", () => {
-    // 7d - 1ms is still inside the 7-day window
+  it("7 days minus 1ms is still 'soon' (window upper edge is exclusive)", () => {
+    // due - now = 7d - 1ms, which is < 7d, so still inside the 'soon' window.
     const nearlySevenDays = new Date(now + 7 * 24 * 3600_000 - 1).toISOString();
     assert.equal(dueStatus(nearlySevenDays, now), "soon");
   });
 
-  it("exactly 7 days + 1ms is 'later'", () => {
+  it("exactly 7 days is 'later' (boundary is exclusive)", () => {
+    // Source uses a strict `<`: due - now === 7d is NOT < 7d, so 'later'.
+    const exactlySevenDays = new Date(now + 7 * 24 * 3600_000).toISOString();
+    assert.equal(dueStatus(exactlySevenDays, now), "later");
+  });
+
+  it("7 days plus 1ms is 'later'", () => {
     const justPastSevenDays = new Date(now + 7 * 24 * 3600_000 + 1).toISOString();
     assert.equal(dueStatus(justPastSevenDays, now), "later");
   });
