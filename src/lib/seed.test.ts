@@ -1,6 +1,7 @@
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  demoPostsEnabled,
   seedLabels,
   seedPosts,
   seedProjects,
@@ -287,6 +288,35 @@ describe("seedProjects + seedPosts value-range invariants", () => {
     for (const u of seedUsers) {
       assert.ok(u.handle.length > 0);
       assert.ok(!/\s/.test(u.handle), `handle ${u.handle} has whitespace`);
+    }
+  });
+});
+
+describe("demoPostsEnabled", () => {
+  const KEY = "NEXT_PUBLIC_DEMO_POSTS";
+  const original = process.env[KEY];
+
+  after(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it("defaults to enabled when the env var is unset", () => {
+    delete process.env[KEY];
+    assert.equal(demoPostsEnabled(), true);
+  });
+
+  it("stays enabled for values like 'true' or '1'", () => {
+    for (const v of ["true", "1", "on", "yes", "anything"]) {
+      process.env[KEY] = v;
+      assert.equal(demoPostsEnabled(), true, `value ${v}`);
+    }
+  });
+
+  it("disables for false / 0 / off / no, case-insensitive", () => {
+    for (const v of ["false", "FALSE", "0", "off", "OFF", "no", "No"]) {
+      process.env[KEY] = v;
+      assert.equal(demoPostsEnabled(), false, `value ${v}`);
     }
   });
 });

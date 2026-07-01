@@ -11,6 +11,7 @@ import {
   User,
 } from "./types";
 import {
+  demoPostsEnabled,
   seedLabels,
   seedPosts,
   seedProjects,
@@ -47,7 +48,16 @@ export interface WorkspaceState {
 
 export const WORKSPACE_VERSION = 1 as const;
 
-export function emptyWorkspace(): WorkspaceState {
+/**
+ * The seeded demo workspace. Despite the historical name this is the
+ * full demo dataset, not a blank slate — see blankWorkspace() for that.
+ *
+ * `opts.demoPosts` overrides the NEXT_PUBLIC_DEMO_POSTS feature flag
+ * (used by tests and callers that need a deterministic answer);
+ * omitted, the flag decides whether fresh workspaces get demo posts.
+ */
+export function emptyWorkspace(opts?: { demoPosts?: boolean }): WorkspaceState {
+  const withDemoPosts = opts?.demoPosts ?? demoPostsEnabled();
   return {
     version: WORKSPACE_VERSION,
     theme: "system",
@@ -56,7 +66,32 @@ export function emptyWorkspace(): WorkspaceState {
     labels: seedLabels,
     projects: seedProjects,
     tasks: seedTasks,
-    posts: seedPosts,
+    posts: withDemoPosts ? seedPosts : [],
+  };
+}
+
+/**
+ * A genuinely blank workspace: one owner user, nothing else. This is
+ * what "start fresh" in Settings produces — real work begins here
+ * without demo content to delete first.
+ */
+export function blankWorkspace(): WorkspaceState {
+  const you: User = {
+    id: "u_you",
+    name: "You",
+    handle: "you",
+    color: "#6b4ee4",
+    role: "Owner",
+  };
+  return {
+    version: WORKSPACE_VERSION,
+    theme: "system",
+    currentUserId: you.id,
+    users: [you],
+    labels: [],
+    projects: [],
+    tasks: [],
+    posts: [],
   };
 }
 

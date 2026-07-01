@@ -21,6 +21,21 @@ function offset(days: number): string {
   return new Date(Date.parse(EPOCH) + days * DAY_MS).toISOString();
 }
 
+/**
+ * Feature flag for demo posts in fresh workspaces.
+ *
+ * Defaults to enabled so local dev, demos, and the E2E suite keep the
+ * seeded posts. Deployments that want fresh accounts to start with an
+ * empty Posts surface set NEXT_PUBLIC_DEMO_POSTS=false (also accepts
+ * 0 / off / no, case-insensitive). NEXT_PUBLIC_* is inlined at build
+ * time by Next.js, so the flag is a deploy-level switch, not per-user.
+ */
+export function demoPostsEnabled(): boolean {
+  const v = process.env.NEXT_PUBLIC_DEMO_POSTS;
+  if (!v) return true;
+  return !["false", "0", "off", "no"].includes(v.toLowerCase());
+}
+
 export const seedUsers: User[] = [
   { id: "u_rob", name: "Robert Clapp", handle: "rob", color: "#ff5c1a", role: "Founder" },
   { id: "u_mina", name: "Mina Okafor", handle: "mina", color: "#3b4ae4", role: "Design Lead" },
