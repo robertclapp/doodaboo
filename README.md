@@ -88,6 +88,10 @@ The Playwright suite under `e2e/` covers the critical paths:
 - Posts list, live intrinsic-score updates as the composer changes, Hook
   Lab variant generation + draft spawning, Compare view, Insights page.
 - Playbook library + detail, apply-playbook modal preview.
+- The full post loop: compose → publish → engagement snapshot → live
+  blended score, persisted across reload.
+- Task-detail write-through persistence (edits survive an immediate
+  reload) and the Settings blank-workspace / reset-to-demo lifecycle.
 
 Each spec resets `localStorage` in `beforeEach` so the seed workspace is
 always the starting state. The default config runs against a production
@@ -193,12 +197,29 @@ sorting, and threshold projection monotonicity.
 
 ## Roadmap
 
+### Done
+
+- **Seed posts behind a feature flag** — set
+  `NEXT_PUBLIC_DEMO_POSTS=false` (also `0` / `off` / `no`) at build time
+  and fresh workspaces start with an empty Posts surface; projects,
+  tasks, and members still seed. Defaults to enabled so local dev,
+  demos, and E2E keep the full demo workspace. Settings → Danger zone
+  also offers **Start blank workspace** for a true clean slate at
+  runtime.
+- **E2E: post-create → score → snapshot loop** —
+  `e2e/post-loop.spec.ts` drives compose → intrinsic score movement →
+  publish → engagement snapshot → live blended score, including
+  persistence across reload.
+- **Desktop vault adapter** — zustand's persist routes through Tauri's
+  `invoke("vault_save")` when running in the desktop webview
+  (`src/lib/tauri-storage.ts`), so the app reads/writes the on-disk
+  vault directly.
+
+### Planned
+
 - Real backend (Supabase or Convex) so workspaces sync across devices.
 - Auth.
 - Real-time collaboration.
-- Migrate seed posts behind a feature flag for fresh accounts.
-- Playwright E2E suite covering the post-create → score → snapshot
-  loop.
 - Replace heuristic scoring with a fine-tuned model fed by historical
   post telemetry.
 

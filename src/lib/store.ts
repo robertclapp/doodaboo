@@ -18,6 +18,7 @@ import {
   addLabel as addLabelMut,
   addSnapshot as addSnapshotMut,
   addUser as addUserMut,
+  blankWorkspace,
   createPost as createPostMut,
   createProject as createProjectMut,
   createTask as createTaskMut,
@@ -67,6 +68,7 @@ interface StoreState extends WorkspaceState {
   setHydrated: (v: boolean) => void;
   setTheme: (t: Theme) => void;
   resetToSeed: () => void;
+  resetToBlank: () => void;
   exportState: () => ExportPayload;
   importState: (payload: ExportPayload) => void;
 
@@ -153,6 +155,7 @@ export const useStore = create<StoreState>()(
       setHydrated: (v) => set({ hydrated: v }),
       setTheme: (theme) => apply(set, get, (s) => setThemeMut(s, theme)),
       resetToSeed: () => set({ ...emptyWorkspace() }),
+      resetToBlank: () => set({ ...blankWorkspace() }),
       exportState: () => ({
         version: EXPORT_VERSION,
         exportedAt: new Date().toISOString(),

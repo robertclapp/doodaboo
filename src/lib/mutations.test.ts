@@ -5,6 +5,7 @@ import {
   addLabel,
   addSnapshot,
   addUser,
+  blankWorkspace,
   createPost,
   createProject,
   createTask,
@@ -182,6 +183,55 @@ describe("emptyWorkspace", () => {
     const s = emptyWorkspace();
     assert.equal(s.theme, "system");
     assert.ok(s.users.find((u) => u.id === s.currentUserId));
+  });
+
+  it("includes demo posts when demoPosts: true", () => {
+    assert.ok(emptyWorkspace({ demoPosts: true }).posts.length > 0);
+  });
+
+  it("excludes demo posts when demoPosts: false, leaving the rest of the seed intact", () => {
+    const s = emptyWorkspace({ demoPosts: false });
+    assert.equal(s.posts.length, 0);
+    assert.ok(s.projects.length > 0);
+    assert.ok(s.tasks.length > 0);
+    assert.ok(s.users.length > 0);
+  });
+});
+
+describe("blankWorkspace", () => {
+  it("contains exactly one owner user who is the current user", () => {
+    const s = blankWorkspace();
+    assert.equal(s.users.length, 1);
+    assert.equal(s.currentUserId, s.users[0].id);
+  });
+
+  it("has no projects, tasks, labels, or posts", () => {
+    const s = blankWorkspace();
+    assert.equal(s.projects.length, 0);
+    assert.equal(s.tasks.length, 0);
+    assert.equal(s.labels.length, 0);
+    assert.equal(s.posts.length, 0);
+  });
+
+  it("uses the current WORKSPACE_VERSION and system theme", () => {
+    const s = blankWorkspace();
+    assert.equal(s.version, WORKSPACE_VERSION);
+    assert.equal(s.theme, "system");
+  });
+
+  it("mutations work on a blank workspace (create project + task)", () => {
+    const s0 = blankWorkspace();
+    const { state: s1, project } = createProject(s0, {
+      name: "First",
+      key: "FIR",
+    });
+    const { state: s2, task } = createTask(s1, {
+      projectId: project.id,
+      title: "First task",
+    });
+    assert.equal(s2.projects.length, 1);
+    assert.equal(s2.tasks.length, 1);
+    assert.equal(task.number, 1);
   });
 });
 
