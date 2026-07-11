@@ -104,11 +104,47 @@ npm run build         # produce the build the suite runs against
 npm run e2e
 ```
 
-## Deploying to Vercel
+## Deploying
 
-The repo includes a `vercel.json` with sensible security headers
-(`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`,
-`Permissions-Policy`).
+Security headers (`X-Frame-Options`, `X-Content-Type-Options`,
+`Referrer-Policy`, `Permissions-Policy`) live in `next.config.mjs`
+`headers()`, so every host — Railway, Vercel, bare `next start` —
+serves the same policy.
+
+### Environment variables (any host)
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SITE_URL` | recommended | Used by `app/sitemap.ts`, `app/robots.ts`, `app/manifest.ts`, and `metadataBase`. Defaults let previews work unconfigured. |
+| `NEXT_PUBLIC_DEMO_POSTS` | no | Set to `false` so fresh workspaces start with an empty Posts surface (see Roadmap → Done). Build-time flag. |
+| `DOODABOO_VAULT` | no | Server-side vault path for the HTTP API's persistence. Only needed if you use the API as a backend; the web app itself is localStorage-first. |
+
+### Railway
+
+The repo ships a `railway.json` (Railpack builder, `/api/health`
+healthcheck, on-failure restarts). Deploy is:
+
+```bash
+# one-time
+railway init          # or link the repo in the Railway dashboard
+railway variables --set NEXT_PUBLIC_SITE_URL=https://your-app.up.railway.app
+
+# deploy
+railway up            # or push to main with GitHub auto-deploys
+```
+
+Railway injects `PORT`; `next start` picks it up automatically. The
+healthcheck returns 200 immediately — its body reports vault status
+separately, so a missing vault never blocks a deploy.
+
+**Persistent API vault (optional).** The one thing Railway offers that
+serverless hosts can't: attach a volume (e.g. mounted at `/data`) and
+set `DOODABOO_VAULT=/data/vault`, and the HTTP API under `/api/*`
+reads/writes a real on-disk vault that survives redeploys — same
+format the CLI and desktop app use. Check `/api/health` to confirm the
+vault is detected.
+
+### Vercel
 
 ```bash
 # one-time
@@ -119,9 +155,8 @@ vercel env add NEXT_PUBLIC_SITE_URL production    # https://doodaboo.com (or you
 vercel --prod
 ```
 
-`NEXT_PUBLIC_SITE_URL` is used by `app/sitemap.ts`, `app/robots.ts`,
-`app/manifest.ts`, and the metadata `metadataBase`. Defaulting it lets
-preview deploys work without configuration.
+Note: Vercel's filesystem is ephemeral, so `DOODABOO_VAULT` API
+persistence doesn't apply there — the web app runs localStorage-first.
 
 ## Architecture
 
