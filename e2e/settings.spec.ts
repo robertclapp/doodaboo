@@ -11,8 +11,9 @@ test.describe("Settings workspace lifecycle", () => {
   }) => {
     await page.goto("/settings");
 
-    // Seeded workspace has demo content.
-    await expect(page.getByTestId("stat-projects")).not.toHaveText("0");
+    // Seeded workspace has demo content. Positive matcher so the check
+    // waits for hydration instead of passing vacuously on the null render.
+    await expect(page.getByTestId("stat-projects")).toHaveText(/^[1-9]\d*$/);
 
     await page.getByRole("button", { name: /Start blank/i }).click();
     const dialog = page.getByRole("dialog");
@@ -30,8 +31,13 @@ test.describe("Settings workspace lifecycle", () => {
     await page.reload();
     await expect(page.getByTestId("stat-projects")).toHaveText("0");
 
-    // Demo posts are gone from the Posts surface too.
+    // Demo posts are gone from the Posts surface too. Anchor on the
+    // hydrated empty state first so the negative check can't pass
+    // vacuously while the page is still a null render.
     await page.goto("/posts");
+    await expect(
+      page.getByRole("main").getByText(/No posts yet/i),
+    ).toBeVisible();
     await expect(
       page.getByRole("main").getByText(/Brutalist drop teaser/i),
     ).toHaveCount(0);
@@ -43,7 +49,7 @@ test.describe("Settings workspace lifecycle", () => {
       .getByRole("dialog")
       .getByRole("button", { name: /Reset to seed/i })
       .click();
-    await expect(page.getByTestId("stat-projects")).not.toHaveText("0");
-    await expect(page.getByTestId("stat-members")).not.toHaveText("1");
+    await expect(page.getByTestId("stat-projects")).toHaveText(/^[1-9]\d*$/);
+    await expect(page.getByTestId("stat-members")).toHaveText(/^[2-9]\d*$/);
   });
 });

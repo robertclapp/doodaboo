@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { createTauriStorage, isTauri } from "./tauri-storage";
+import { demoPostsEnabled } from "./seed";
 import {
   Comment,
   EngagementSnapshot,
@@ -144,7 +145,11 @@ function extract(s: StoreState): WorkspaceState {
   };
 }
 
-const seed = emptyWorkspace();
+// Fresh workspaces honor the NEXT_PUBLIC_DEMO_POSTS flag (inlined at
+// build time in both the server and client bundles, so SSR and CSR
+// agree). The pure mutation layer stays deterministic — the env read
+// happens only here, at the web entry point.
+const seed = emptyWorkspace({ demoPosts: demoPostsEnabled() });
 
 export const useStore = create<StoreState>()(
   persist(
@@ -154,8 +159,11 @@ export const useStore = create<StoreState>()(
 
       setHydrated: (v) => set({ hydrated: v }),
       setTheme: (theme) => apply(set, get, (s) => setThemeMut(s, theme)),
-      resetToSeed: () => set({ ...emptyWorkspace() }),
-      resetToBlank: () => set({ ...blankWorkspace() }),
+      // "Reset to demo data" is an explicit request for the demo, so it
+      // always includes demo posts regardless of the fresh-account flag.
+      resetToSeed: () => set({ ...emptyWorkspace({ demoPosts: true }) }),
+      // Starting blank wipes content, not preferences — keep the theme.
+      resetToBlank: () => set({ ...blankWorkspace(), theme: get().theme }),
       exportState: () => ({
         version: EXPORT_VERSION,
         exportedAt: new Date().toISOString(),

@@ -29,6 +29,10 @@ function offset(days: number): string {
  * empty Posts surface set NEXT_PUBLIC_DEMO_POSTS=false (also accepts
  * 0 / off / no, case-insensitive). NEXT_PUBLIC_* is inlined at build
  * time by Next.js, so the flag is a deploy-level switch, not per-user.
+ *
+ * Only the web store consults this (src/lib/store.ts) — the pure
+ * mutation layer takes an explicit `demoPosts` option instead, so the
+ * CLI, API, and tests stay deterministic regardless of ambient env.
  */
 export function demoPostsEnabled(): boolean {
   const v = process.env.NEXT_PUBLIC_DEMO_POSTS;

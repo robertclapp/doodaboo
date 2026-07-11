@@ -202,6 +202,7 @@ describe("blankWorkspace", () => {
   it("contains exactly one owner user who is the current user", () => {
     const s = blankWorkspace();
     assert.equal(s.users.length, 1);
+    assert.equal(s.users[0].role, "Owner");
     assert.equal(s.currentUserId, s.users[0].id);
   });
 

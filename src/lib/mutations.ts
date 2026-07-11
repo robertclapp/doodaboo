@@ -11,7 +11,6 @@ import {
   User,
 } from "./types";
 import {
-  demoPostsEnabled,
   seedLabels,
   seedPosts,
   seedProjects,
@@ -52,12 +51,14 @@ export const WORKSPACE_VERSION = 1 as const;
  * The seeded demo workspace. Despite the historical name this is the
  * full demo dataset, not a blank slate — see blankWorkspace() for that.
  *
- * `opts.demoPosts` overrides the NEXT_PUBLIC_DEMO_POSTS feature flag
- * (used by tests and callers that need a deterministic answer);
- * omitted, the flag decides whether fresh workspaces get demo posts.
+ * `opts.demoPosts` controls whether demo posts are included and
+ * defaults to true, keeping this module deterministic (no env reads)
+ * for the CLI, API, and tests. The NEXT_PUBLIC_DEMO_POSTS feature
+ * flag is consulted at the web entry point (src/lib/store.ts), where
+ * Next.js build-time inlining actually applies.
  */
 export function emptyWorkspace(opts?: { demoPosts?: boolean }): WorkspaceState {
-  const withDemoPosts = opts?.demoPosts ?? demoPostsEnabled();
+  const withDemoPosts = opts?.demoPosts ?? true;
   return {
     version: WORKSPACE_VERSION,
     theme: "system",

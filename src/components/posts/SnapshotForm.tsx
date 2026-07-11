@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
@@ -24,6 +24,8 @@ export function SnapshotForm({
   const [saves, setSaves] = useState<number>(0);
   const [retentionPct, setRetentionPct] = useState<string>("");
   const [watchTimeAvgSec, setWatchTimeAvgSec] = useState<string>("");
+  const retentionId = useId();
+  const watchTimeId = useId();
 
   const submit = () => {
     onAdd({
@@ -78,29 +80,27 @@ export function SnapshotForm({
         <Field label="Shares" value={shares} onChange={setShares} />
         <Field label="Saves" value={saves} onChange={setSaves} />
         <div>
-          <Label>
-            Retention %
-            <Input
-              type="number"
-              min={0}
-              max={100}
-              value={retentionPct}
-              onChange={(e) => setRetentionPct(e.target.value)}
-              placeholder="optional"
-            />
-          </Label>
+          <Label htmlFor={retentionId}>Retention %</Label>
+          <Input
+            id={retentionId}
+            type="number"
+            min={0}
+            max={100}
+            value={retentionPct}
+            onChange={(e) => setRetentionPct(e.target.value)}
+            placeholder="optional"
+          />
         </div>
         <div>
-          <Label>
-            Watch time (sec)
-            <Input
-              type="number"
-              min={0}
-              value={watchTimeAvgSec}
-              onChange={(e) => setWatchTimeAvgSec(e.target.value)}
-              placeholder="optional"
-            />
-          </Label>
+          <Label htmlFor={watchTimeId}>Watch time (sec)</Label>
+          <Input
+            id={watchTimeId}
+            type="number"
+            min={0}
+            value={watchTimeAvgSec}
+            onChange={(e) => setWatchTimeAvgSec(e.target.value)}
+            placeholder="optional"
+          />
         </div>
       </div>
       <div className="border-t-[1.5px] border-ink/10 px-3 py-2 flex items-center justify-end gap-2">
@@ -126,19 +126,20 @@ function Field({
   value: number;
   onChange: (n: number) => void;
 }) {
-  // The input nests inside the <label> so it's implicitly associated —
-  // screen readers announce the field name and tests can getByLabel().
+  // htmlFor/id association (not nesting) so screen readers announce the
+  // field name and tests can getByLabel() without the input inheriting
+  // the label's caption typography via preflight's `font: inherit`.
+  const id = useId();
   return (
     <div>
-      <Label>
-        {label}
-        <Input
-          type="number"
-          min={0}
-          value={value}
-          onChange={(e) => onChange(Number(e.target.value) || 0)}
-        />
-      </Label>
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type="number"
+        min={0}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value) || 0)}
+      />
     </div>
   );
 }
