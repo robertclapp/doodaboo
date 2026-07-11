@@ -43,6 +43,39 @@ test.describe("Projects + tasks", () => {
     ).toBeVisible();
   });
 
+  test("task edits write through the store and survive an immediate reload", async ({
+    page,
+  }) => {
+    // Regression guard for the store-controlled task detail: title and
+    // description persist per keystroke — no debounce window, no local
+    // mirror to flush — so closing the tab mid-thought can't lose text.
+    await page
+      .getByRole("link", { name: /Marketing Website/i })
+      .first()
+      .click();
+    await page
+      .getByRole("main")
+      .getByText("Redesign pricing page hero")
+      .click();
+    await expect(page).toHaveURL(/\/tasks\/t_/);
+
+    // Textboxes on the task page, in order: title input, description
+    // textarea, new-comment textarea.
+    const title = page.getByRole("textbox").first();
+    const description = page.getByRole("textbox").nth(1);
+    await title.fill("Redesign pricing page hero v2");
+    await description.fill("E2E write-through description");
+
+    // Reload immediately — an autosave debounce would drop these edits.
+    await page.reload();
+    await expect(page.getByRole("textbox").first()).toHaveValue(
+      "Redesign pricing page hero v2",
+    );
+    await expect(page.getByRole("textbox").nth(1)).toHaveValue(
+      "E2E write-through description",
+    );
+  });
+
   test("kanban board lists every status column", async ({ page }) => {
     await page
       .getByRole("link", { name: /Marketing Website/i })

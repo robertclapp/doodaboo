@@ -47,7 +47,18 @@ export interface WorkspaceState {
 
 export const WORKSPACE_VERSION = 1 as const;
 
-export function emptyWorkspace(): WorkspaceState {
+/**
+ * The seeded demo workspace. Despite the historical name this is the
+ * full demo dataset, not a blank slate — see blankWorkspace() for that.
+ *
+ * `opts.demoPosts` controls whether demo posts are included and
+ * defaults to true, keeping this module deterministic (no env reads)
+ * for the CLI, API, and tests. The NEXT_PUBLIC_DEMO_POSTS feature
+ * flag is consulted at the web entry point (src/lib/store.ts), where
+ * Next.js build-time inlining actually applies.
+ */
+export function emptyWorkspace(opts?: { demoPosts?: boolean }): WorkspaceState {
+  const withDemoPosts = opts?.demoPosts ?? true;
   return {
     version: WORKSPACE_VERSION,
     theme: "system",
@@ -56,7 +67,32 @@ export function emptyWorkspace(): WorkspaceState {
     labels: seedLabels,
     projects: seedProjects,
     tasks: seedTasks,
-    posts: seedPosts,
+    posts: withDemoPosts ? seedPosts : [],
+  };
+}
+
+/**
+ * A genuinely blank workspace: one owner user, nothing else. This is
+ * what "start fresh" in Settings produces — real work begins here
+ * without demo content to delete first.
+ */
+export function blankWorkspace(): WorkspaceState {
+  const you: User = {
+    id: "u_you",
+    name: "You",
+    handle: "you",
+    color: "#6b4ee4",
+    role: "Owner",
+  };
+  return {
+    version: WORKSPACE_VERSION,
+    theme: "system",
+    currentUserId: you.id,
+    users: [you],
+    labels: [],
+    projects: [],
+    tasks: [],
+    posts: [],
   };
 }
 

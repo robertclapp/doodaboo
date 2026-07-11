@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import {
   Download,
+  Eraser,
   Monitor,
   Moon,
   RotateCcw,
@@ -20,6 +21,7 @@ export default function SettingsPage() {
   const theme = useStore((s) => s.theme);
   const setTheme = useStore((s) => s.setTheme);
   const resetToSeed = useStore((s) => s.resetToSeed);
+  const resetToBlank = useStore((s) => s.resetToBlank);
   const exportState = useStore((s) => s.exportState);
   const importState = useStore((s) => s.importState);
 
@@ -90,6 +92,19 @@ export default function SettingsPage() {
     if (!ok) return;
     resetToSeed();
     toast.success("Reset to seed data");
+  };
+
+  const handleStartBlank = async () => {
+    const ok = await confirm({
+      title: "Start blank workspace",
+      message:
+        "All current projects, tasks, labels, posts and users will be deleted. You'll start with an empty workspace and a single owner account. This can't be undone.",
+      confirmLabel: "Start blank",
+      destructive: true,
+    });
+    if (!ok) return;
+    resetToBlank();
+    toast.success("Started a blank workspace");
   };
 
   return (
@@ -183,7 +198,7 @@ export default function SettingsPage() {
 
         <section className="col-span-12 border-[1.5px] border-ink bg-paper">
           <Header>Danger zone</Header>
-          <div className="p-4 flex items-center justify-between gap-4 flex-wrap">
+          <div className="p-4 flex items-center justify-between gap-4 flex-wrap border-b-[1.5px] border-ink/10">
             <div>
               <div className="text-sm font-semibold">Reset to demo data</div>
               <div className="text-xs text-ink/60">
@@ -197,6 +212,22 @@ export default function SettingsPage() {
               onClick={handleReset}
             >
               Reset workspace
+            </Button>
+          </div>
+          <div className="p-4 flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <div className="text-sm font-semibold">Start blank workspace</div>
+              <div className="text-xs text-ink/60">
+                Deletes everything — no demo content, just you. The starting
+                point for real work.
+              </div>
+            </div>
+            <Button
+              variant="danger"
+              iconLeft={<Eraser size={12} />}
+              onClick={handleStartBlank}
+            >
+              Start blank
             </Button>
           </div>
         </section>
@@ -249,7 +280,12 @@ function Stat({ label, value }: { label: string; value: number }) {
       <div className="font-mono text-[9px] uppercase tracking-widest text-ink/50">
         {label}
       </div>
-      <div className="text-2xl font-bold tabular-nums leading-none">{value}</div>
+      <div
+        data-testid={`stat-${label.toLowerCase()}`}
+        className="text-2xl font-bold tabular-nums leading-none"
+      >
+        {value}
+      </div>
     </div>
   );
 }

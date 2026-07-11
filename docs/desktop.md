@@ -85,9 +85,12 @@ This populates every platform-specific size Tauri's bundler expects.
 
 ## Roadmap
 
-- Frontend storage adapter that auto-detects Tauri and routes through
-  `invoke('vault_save')` instead of localStorage, so the desktop app
-  reads/writes the vault directly without the bundled API server.
-- Auto-update channel via `tauri-plugin-updater`.
-- Mobile builds (iOS / Android) once the storage adapter lands —
+- ✅ **Shipped** — frontend storage adapter that auto-detects Tauri and
+  routes through `invoke('vault_save')` instead of localStorage
+  (`src/lib/tauri-storage.ts`, wired in `src/lib/store.ts`), so the
+  desktop app reads/writes the vault directly without the bundled API
+  server.
+- Auto-update channel via `tauri-plugin-updater` (requires generating
+  and configuring an update signing keypair).
+- Mobile builds (iOS / Android) — the storage adapter now exists, and
   Tauri 2 already supports mobile targets.
