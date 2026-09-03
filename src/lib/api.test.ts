@@ -70,6 +70,17 @@ describe("safeJson", () => {
       (err: any) => err instanceof ApiError && err.status === 400,
     );
   });
+
+  // A valid-but-falsy body must come back as-is rather than being mistaken
+  // for a parse failure — and no content-type header is required.
+  it("parses null body as null", async () => {
+    const req = new Request("http://t/", {
+      method: "POST",
+      body: "null",
+    });
+    const result = await safeJson<null>(req);
+    assert.equal(result, null);
+  });
 });
 
 describe("ApiError", () => {
