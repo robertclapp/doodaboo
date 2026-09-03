@@ -54,4 +54,32 @@ test.describe("Post composer field behavior", () => {
     // a duplicate snapshot at the same minute.
     await expect(minute).toHaveValue("20");
   });
+
+  test("a manually chosen Minute survives deleting another snapshot", async ({
+    page,
+  }) => {
+    await page.goto("/posts/new");
+    await page.getByPlaceholder(/Working title/i).fill("Minute preservation");
+    await page.getByRole("button", { name: /Mark live/i }).click();
+    await expect(page).toHaveURL(/\/posts\/po_/);
+
+    // Bank one snapshot so there is something to delete.
+    await page.getByLabel(/^Views$/).fill("1000");
+    await page.getByRole("button", { name: /Save snapshot/i }).click();
+    await expect(page.getByText(/Snapshots · 1/i)).toBeVisible();
+
+    // Start a second entry with a deliberately chosen minute + metrics.
+    const minute = page.getByLabel(/^Minute$/);
+    await minute.fill("42");
+    await page.getByLabel(/^Views$/).fill("5000");
+
+    // Deleting a snapshot also recomputes the parent's suggestion. Following
+    // it here would rewrite the chosen minute while keeping the entered
+    // metrics, recording them at a time the user never picked.
+    await page.getByRole("button", { name: /^remove$/i }).first().click();
+    await expect(page.getByText(/Snapshots · 0/i)).toBeVisible();
+
+    await expect(minute).toHaveValue("42");
+    await expect(page.getByLabel(/^Views$/)).toHaveValue("5000");
+  });
 });

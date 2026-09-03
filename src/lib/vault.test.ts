@@ -546,6 +546,39 @@ describe("migrate — task/project numbering", () => {
     assert.equal(s.projects[0].nextTaskNumber, 9);
   });
 
+  it("advances a stale-but-valid counter past repaired task numbers", () => {
+    // nextTaskNumber 2 is a positive integer, so a typeof/positive check alone
+    // leaves it alone — but the numberless task is repaired to 2 as well, and
+    // the next createTask would hand out 2 again.
+    const s = migrate({
+      version: 1,
+      projects: [
+        { id: "p1", name: "P", key: "WEB", memberIds: [], nextTaskNumber: 2 },
+      ],
+      tasks: [
+        { id: "t1", projectId: "p1", title: "a", number: 1 },
+        { id: "t2", projectId: "p1", title: "b" },
+      ],
+    });
+    const numbers = s.tasks.map((t) => t.number);
+    assert.deepEqual(numbers, [1, 2]);
+    assert.ok(
+      s.projects[0].nextTaskNumber > Math.max(...numbers),
+      `counter ${s.projects[0].nextTaskNumber} must lead ${Math.max(...numbers)}`,
+    );
+  });
+
+  it("leaves a counter that already leads its tasks alone", () => {
+    const s = migrate({
+      version: 1,
+      projects: [
+        { id: "p1", name: "P", key: "WEB", memberIds: [], nextTaskNumber: 9 },
+      ],
+      tasks: [{ id: "t1", projectId: "p1", title: "a", number: 1 }],
+    });
+    assert.equal(s.projects[0].nextTaskNumber, 9);
+  });
+
   it("repairs a NaN nextTaskNumber rather than trusting typeof", () => {
     const s = migrate({
       version: 1,

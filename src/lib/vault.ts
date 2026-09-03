@@ -412,12 +412,17 @@ export function migrate(input: unknown): WorkspaceState {
 
   for (const project of state.projects) {
     if (!Array.isArray(project.memberIds)) project.memberIds = [];
-    if (!isPositiveInt(project.nextTaskNumber)) {
-      const max = (tasksByProject.get(project.id) ?? []).reduce(
-        (m, t) => Math.max(m, t.number),
-        0,
-      );
-      project.nextTaskNumber = max + 1;
+    const maxNumber = (tasksByProject.get(project.id) ?? []).reduce(
+      (m, t) => Math.max(m, t.number),
+      0,
+    );
+    // The counter must also *lead* the highest number in use, not merely be
+    // a positive integer. A stale-but-valid counter (say 2, when a repaired
+    // task above was just assigned 2) would otherwise survive this check and
+    // hand the same number out again on the next createTask — reintroducing
+    // the duplicate identifiers this repair exists to prevent.
+    if (!isPositiveInt(project.nextTaskNumber) || project.nextTaskNumber <= maxNumber) {
+      project.nextTaskNumber = maxNumber + 1;
     }
   }
 
