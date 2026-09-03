@@ -356,3 +356,166 @@ describe("PLAYBOOKS catalogue integrity", () => {
     }
   });
 });
+
+describe("applyPlaybook — platform mismatch skips hashtags", () => {
+  it("does not set hashtags when post platform is NOT in playbook.platforms", () => {
+    // pb_3s_hook targets tiktok/reels/shorts — applying to 'x' should skip hashtags.
+    const threeSecHook = getPlaybook("pb_3s_hook")!;
+    const r = applyPlaybook(
+      makePost({ platform: "x" }),
+      threeSecHook,
+    );
+    // Hashtags should not be set because 'x' is not in threeSecHook.platforms
+    assert.deepEqual(r.patch.content.hashtags, []);
+  });
+});
+
+describe("applyPlaybook — pb_curiosity_gap (text-first platforms)", () => {
+  const curiosityGap = getPlaybook("pb_curiosity_gap")!;
+
+  it("fills empty hook and caption", () => {
+    const r = applyPlaybook(makePost({ platform: "x" }), curiosityGap);
+    assert.equal(r.patch.content.hook, curiosityGap.hookHint);
+    assert.equal(r.patch.content.caption, curiosityGap.captionHint);
+    assert.ok(r.changes.some((c) => /hook/i.test(c)));
+  });
+
+  it("has no format override (no format change logged)", () => {
+    const r = applyPlaybook(makePost({ platform: "x" }), curiosityGap);
+    assert.ok(!r.changes.some((c) => /format/i.test(c)));
+  });
+
+  it("has no duration override", () => {
+    const r = applyPlaybook(
+      makePost({ platform: "x", content: { durationSec: 60 } as any }),
+      curiosityGap,
+    );
+    assert.equal(r.patch.content.durationSec, 60);
+  });
+
+  it("bumps novelty and emotion but not trendMatch (no trendMatch in contextDefaults)", () => {
+    const r = applyPlaybook(
+      makePost({ platform: "x", context: { novelty: 1, emotion: 1 } as any }),
+      curiosityGap,
+    );
+    assert.equal(r.patch.context.novelty, 4);
+    assert.equal(r.patch.context.emotion, 4);
+  });
+});
+
+describe("applyPlaybook — pb_x_funnel (thread with empty hashtags)", () => {
+  const xFunnel = getPlaybook("pb_x_funnel")!;
+
+  it("does NOT add hashtags (defaultHashtags is empty array)", () => {
+    const r = applyPlaybook(makePost({ platform: "x" }), xFunnel);
+    // pb_x_funnel.defaultHashtags = [] → no hashtag change reported
+    assert.ok(!r.changes.some((c) => /hashtag/i.test(c)));
+  });
+});
+
+describe("applyPlaybook — pb_founder_essay (LinkedIn longform)", () => {
+  const founderEssay = getPlaybook("pb_founder_essay")!;
+  assert.ok(founderEssay, "pb_founder_essay missing from catalogue");
+
+  it("switches format to text on a video post", () => {
+    const r = applyPlaybook(
+      makePost({ platform: "linkedin", content: { format: "video" } as any }),
+      founderEssay,
+    );
+    assert.equal(r.patch.content.format, "text");
+    assert.ok(r.changes.some((c) => /text/i.test(c)));
+  });
+
+  it("fills hook and caption when empty", () => {
+    const r = applyPlaybook(makePost({ platform: "linkedin" }), founderEssay);
+    assert.equal(r.patch.content.hook, founderEssay.hookHint);
+    assert.equal(r.patch.content.caption, founderEssay.captionHint);
+  });
+
+  it("bumps emotion to 4 when below target", () => {
+    const r = applyPlaybook(
+      makePost({ platform: "linkedin", context: { emotion: 1 } as any }),
+      founderEssay,
+    );
+    assert.equal(r.patch.context.emotion, 4);
+  });
+});
+
+describe("applyPlaybook — pb_trend_surf (trend category)", () => {
+  const trendSurf = getPlaybook("pb_trend_surf")!;
+  assert.ok(trendSurf, "pb_trend_surf missing from catalogue");
+
+  it("sets hasTrendingAudio=true when user has false", () => {
+    const r = applyPlaybook(
+      makePost({ platform: "tiktok", content: { hasTrendingAudio: false } as any }),
+      trendSurf,
+    );
+    assert.equal(r.patch.content.hasTrendingAudio, true);
+    assert.ok(r.changes.some((c) => /trending audio/i.test(c)));
+  });
+
+  it("sets trendMatch to 5 when user is below", () => {
+    const r = applyPlaybook(
+      makePost({ platform: "tiktok", context: { trendMatch: 1 } as any }),
+      trendSurf,
+    );
+    assert.equal(r.patch.context.trendMatch, 5);
+    assert.ok(r.changes.some((c) => /trendMatch to 5/i.test(c)));
+  });
+});
+
+describe("applyPlaybook — pb_reaction_bait (engagement category)", () => {
+  const reactionBait = getPlaybook("pb_reaction_bait")!;
+  assert.ok(reactionBait, "pb_reaction_bait missing from catalogue");
+
+  it("sets sentiment to controversial when user is neutral", () => {
+    const r = applyPlaybook(
+      makePost({ platform: "x", context: { sentiment: "neutral" } as any }),
+      reactionBait,
+    );
+    assert.equal(r.patch.context.sentiment, "controversial");
+    assert.ok(r.changes.some((c) => /sentiment/i.test(c)));
+  });
+});
+
+describe("applyPlaybook — pb_value_drop (multi-platform engagement)", () => {
+  const valueDrop = getPlaybook("pb_value_drop")!;
+  assert.ok(valueDrop, "pb_value_drop missing from catalogue");
+
+  it("fills hashtags on matching platform", () => {
+    const r = applyPlaybook(makePost({ platform: "tiktok" }), valueDrop);
+    assert.deepEqual(r.patch.content.hashtags, valueDrop.defaultHashtags);
+  });
+
+  it("does not add hashtags when user already has them", () => {
+    const r = applyPlaybook(
+      makePost({
+        platform: "tiktok",
+        content: { hashtags: ["existing"] } as any,
+      }),
+      valueDrop,
+    );
+    assert.deepEqual(r.patch.content.hashtags, ["existing"]);
+  });
+});
+
+describe("applyPlaybook — pb_carousel_save (carousel format)", () => {
+  const carouselSave = getPlaybook("pb_carousel_save")!;
+  assert.ok(carouselSave, "pb_carousel_save missing from catalogue");
+
+  it("does not apply duration override on carousel format", () => {
+    // carouselSave has no durationOverride, so duration should not change
+    const r = applyPlaybook(
+      makePost({
+        platform: "instagram_feed",
+        content: { format: "video", durationSec: 30 } as any,
+      }),
+      carouselSave,
+    );
+    // Format switches to carousel, but carousel format means no duration override
+    assert.equal(r.patch.content.format, "carousel");
+    // After format switches to carousel, durationSec from original should remain
+    // (no durationOverride in pb_carousel_save)
+    assert.equal(r.patch.content.durationSec, 30);
+  });
+});
