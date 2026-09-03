@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Platform,
   PLATFORMS,
@@ -25,6 +25,14 @@ const SENTIMENTS: PostContext["sentiment"][] = [
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+/** "#a, b " -> ["a", "b"]. Lossy: several texts map to the same tag list. */
+function parseHashtags(text: string): string[] {
+  return text
+    .split(/[\s,]+/)
+    .map((s) => s.replace(/^#/, "").trim())
+    .filter(Boolean);
+}
+
 export function PostComposer({
   draft,
   onChange,
@@ -38,6 +46,27 @@ export function PostComposer({
 }) {
   const intrinsic = useMemo(() => scoreIntrinsic(draft), [draft]);
   const profile = platformProfile(draft.platform);
+
+  // The store holds string[], the input needs a string, and parseHashtags is
+  // lossy — "design" and "design " both parse to ["design"]. Rendering
+  // `hashtags.join(" ")` therefore fed the old value back into the DOM on the
+  // very keystroke that typed a separator, so the space/comma vanished and a
+  // second tag could never be typed at all (only pasted). Keeping the raw
+  // text locally makes the field behave, while every keystroke still writes
+  // the parsed tags through to the store.
+  const [hashtagText, setHashtagText] = useState(() =>
+    draft.content.hashtags.join(" "),
+  );
+  // Resync only when the canonical tags no longer match what the buffer
+  // represents — i.e. something else changed them (applying a playbook,
+  // switching posts). Typing can't trigger this, because the buffer always
+  // parses to exactly what was just written.
+  const canonicalTags = draft.content.hashtags.join(" ");
+  useEffect(() => {
+    setHashtagText((text) =>
+      parseHashtags(text).join(" ") === canonicalTags ? text : canonicalTags,
+    );
+  }, [canonicalTags]);
 
   const setContent = (patch: Partial<PostContent>) =>
     onChange({ content: { ...draft.content, ...patch } });
@@ -105,15 +134,11 @@ export function PostComposer({
           <div>
             <Label>Hashtags (comma or space separated)</Label>
             <Input
-              value={draft.content.hashtags.join(" ")}
-              onChange={(e) =>
-                setContent({
-                  hashtags: e.target.value
-                    .split(/[\s,]+/)
-                    .map((s) => s.replace(/^#/, "").trim())
-                    .filter(Boolean),
-                })
-              }
+              value={hashtagText}
+              onChange={(e) => {
+                setHashtagText(e.target.value);
+                setContent({ hashtags: parseHashtags(e.target.value) });
+              }}
               placeholder="brutalism design indiehacker"
             />
             <Hint>

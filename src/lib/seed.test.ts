@@ -284,6 +284,30 @@ describe("seedProjects + seedPosts value-range invariants", () => {
     }
   });
 
+  // Range alone is not enough: a fractional hour/day would still satisfy the
+  // bounds above but break every consumer that indexes by hour or weekday.
+  it("postingHour is in [0, 23]", () => {
+    for (const p of seedPosts) {
+      assert.ok(
+        Number.isInteger(p.context.postingHour) &&
+          p.context.postingHour >= 0 &&
+          p.context.postingHour <= 23,
+        `bad postingHour on ${p.id}: ${p.context.postingHour}`,
+      );
+    }
+  });
+
+  it("dayOfWeek is in [0, 6]", () => {
+    for (const p of seedPosts) {
+      assert.ok(
+        Number.isInteger(p.context.dayOfWeek) &&
+          p.context.dayOfWeek >= 0 &&
+          p.context.dayOfWeek <= 6,
+        `bad dayOfWeek on ${p.id}: ${p.context.dayOfWeek}`,
+      );
+    }
+  });
+
   it("user handles are non-empty strings without spaces", () => {
     for (const u of seedUsers) {
       assert.ok(u.handle.length > 0);

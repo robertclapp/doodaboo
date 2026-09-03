@@ -288,7 +288,11 @@ export function applyPlaybook(post: Post, playbook: Playbook): ApplyResult {
     changes.push("Filled in suggested caption");
   }
   if (
-    playbook.defaultHashtags &&
+    // Length check, not truthiness: `[]` is truthy, so a playbook with an
+    // empty defaultHashtags (e.g. pb_x_funnel) would otherwise assign an
+    // empty array over an already-empty one and report the phantom change
+    // "Set 0 starter hashtags" in the apply-playbook preview.
+    playbook.defaultHashtags?.length &&
     post.content.hashtags.length === 0 &&
     playbook.platforms.includes(post.platform)
   ) {

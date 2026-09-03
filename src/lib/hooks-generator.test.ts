@@ -255,3 +255,31 @@ describe("template content sanity", () => {
     assert.match(v!.hook, /^Remote work isn't what you think/);
   });
 });
+
+describe("generateHooks — subject is trimmed before interpolation", () => {
+  it("does not leak surrounding whitespace into hook text", () => {
+    const padded = generateHooks({ subject: "  pricing pages  " });
+    const clean = generateHooks({ subject: "pricing pages" });
+    assert.deepEqual(
+      padded.map((v) => v.hook),
+      clean.map((v) => v.hook),
+      "a stray space while typing must not change the generated hooks",
+    );
+  });
+
+  it("capitalizes the subject rather than a leading space", () => {
+    const v = generateHooks({ subject: "  remote work" }).find(
+      (x) => x.template.id === "not-what-you-think",
+    );
+    assert.ok(v);
+    assert.match(v!.hook, /^Remote work/);
+  });
+
+  it("does not leave a space before punctuation from a trailing space", () => {
+    const v = generateHooks({ subject: "pricing pages " }).find(
+      (x) => x.template.id === "x-but-y",
+    );
+    assert.ok(v);
+    assert.doesNotMatch(v!.hook, /\s,/, "trailing space produced 'pages , but'");
+  });
+});

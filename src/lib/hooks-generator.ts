@@ -185,8 +185,15 @@ const TEMPLATES: HookTemplate[] = [
 export function generateHooks(ctx: HookContext): HookVariant[] {
   const subject = ctx.subject.trim();
   if (!subject) return [];
+  // Build from the trimmed subject, not the raw ctx. The guard and the slug
+  // already used the trimmed value, but templates interpolated the original —
+  // so a trailing space (near-inevitable while typing) produced hooks like
+  // "Pricing pages , but actually good.", and a leading space defeated
+  // capitalize() entirely (it upper-cased the space). The text is rendered
+  // verbatim on the Lab cards and copied into the spawned draft.
+  const normalized: HookContext = { ...ctx, subject };
   return TEMPLATES.map((t) => {
-    const hook = t.build(ctx);
+    const hook = t.build(normalized);
     const fits: Platform[] = t.fitsAll
       ? ([
           "tiktok",

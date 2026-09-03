@@ -76,6 +76,18 @@ export function handle(fn: () => Promise<Response>): Promise<Response> {
     if (err instanceof Error && err.name === "VaultNotFoundError") {
       return error(503, err.message);
     }
+    // A client error, matched by name for the same cross-module reason as
+    // VaultNotFoundError above. Without this, a request naming a
+    // nonexistent project is reported as a 500 server fault.
+    //
+    // VaultCorruptError is deliberately NOT mapped here: the same error
+    // covers both a malformed client payload and a corrupt vault file on
+    // disk, and `handle` cannot tell them apart — remapping it to 400
+    // would misreport genuine server-side corruption as the caller's
+    // fault. It stays a 500, as the existing tests document.
+    if (err instanceof Error && err.name === "ReferenceNotFoundError") {
+      return error(400, err.message);
+    }
     // eslint-disable-next-line no-console
     console.error("[api] unhandled", err);
     return error(

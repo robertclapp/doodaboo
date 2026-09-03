@@ -7,6 +7,7 @@ import {
   WorkspaceState,
   WORKSPACE_VERSION,
 } from "./mutations";
+import { PLATFORMS, PostContext, ViralityThreshold } from "./types";
 
 /**
  * Vault — the file-system home for a workspace.
@@ -287,6 +288,39 @@ export function watchWorkspace(
  * `undefined`. The `import` CLI and `PUT /api/workspace` both route
  * client-supplied JSON through here, not just `loadWorkspace`.
  */
+/** A non-null, non-array object. `typeof [] === "object"` on its own is not enough. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+/** Task/project counters must be finite positive integers. Rejects NaN. */
+function isPositiveInt(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v > 0;
+}
+
+const PLATFORM_IDS = new Set<string>(PLATFORMS.map((p) => p.id));
+const THRESHOLD_METRICS = new Set(["views", "shares", "engagement_rate"]);
+const THRESHOLD_WINDOWS = new Set(["24h", "7d", "30d"]);
+
+const DEFAULT_THRESHOLD: ViralityThreshold = {
+  metric: "views",
+  value: 100_000,
+  window: "7d",
+};
+
+/** Neutral midpoints — mirrors the empty draft the composer starts from. */
+const DEFAULT_POST_CONTEXT: PostContext = {
+  audienceSize: 1000,
+  accountAvgViews: 200,
+  postingHour: 12,
+  dayOfWeek: 1,
+  topicCategory: "general",
+  novelty: 3,
+  emotion: 3,
+  trendMatch: 3,
+  sentiment: "neutral",
+};
+
 export function migrate(input: unknown): WorkspaceState {
   if (!input || typeof input !== "object") {
     throw new VaultCorruptError("workspace.json root is not an object");
@@ -322,23 +356,84 @@ export function migrate(input: unknown): WorkspaceState {
   // that lost a field. Doing this once at the trust boundary means
   // mutations/UI can assume the invariants below hold.
   const state = obj as unknown as WorkspaceState;
-  for (const project of state.projects) {
-    if (!Array.isArray(project.memberIds)) project.memberIds = [];
-    if (typeof project.nextTaskNumber !== "number") {
-      const max = state.tasks
-        .filter((t) => t.projectId === project.id)
-        .reduce((m, t) => Math.max(m, t.number), 0);
-      project.nextTaskNumber = max + 1;
+
+  // `backfillArray` only guarantees the *container* is an array. A null
+  // or primitive member would escape the property accesses below as a
+  // raw TypeError, breaking this function's documented contract of
+  // throwing VaultCorruptError on corruption (the import CLI prints a
+  // clean message for that type; anything else surfaces a stack trace,
+  // and the API returns 500 instead of 400).
+  const requireObjectMembers = (
+    key: "users" | "labels" | "projects" | "tasks" | "posts",
+  ): void => {
+    const members = state[key] as unknown[];
+    for (let i = 0; i < members.length; i++) {
+      if (!isPlainObject(members[i])) {
+        throw new VaultCorruptError(`workspace ${key}[${i}] is not an object`);
+      }
     }
-  }
+  };
+  requireObjectMembers("users");
+  requireObjectMembers("labels");
+  requireObjectMembers("projects");
+  requireObjectMembers("tasks");
+  requireObjectMembers("posts");
+
+  // Tasks are normalized before projects, because project.nextTaskNumber
+  // is derived from task.number below.
   for (const task of state.tasks) {
     if (!Array.isArray(task.labelIds)) task.labelIds = [];
     if (!Array.isArray(task.comments)) task.comments = [];
     if (!Array.isArray(task.activity)) task.activity = [];
   }
+
+  // Backfill missing/invalid task numbers, continuing from the highest
+  // sound number the project already uses. Without this a task lacking
+  // `number` reaches Math.max(0, undefined) -> NaN below, and because
+  // `typeof NaN === "number"` the repair branch never fires again: the
+  // counter stays poisoned and every task the project creates from then
+  // on is numbered NaN, rendering as "KEY-NaN" and colliding with its
+  // siblings.
+  const tasksByProject = new Map<string, WorkspaceState["tasks"]>();
+  for (const task of state.tasks) {
+    const list = tasksByProject.get(task.projectId) ?? [];
+    list.push(task);
+    tasksByProject.set(task.projectId, list);
+  }
+  for (const list of tasksByProject.values()) {
+    let highest = list.reduce(
+      (m, t) => (isPositiveInt(t.number) ? Math.max(m, t.number) : m),
+      0,
+    );
+    for (const task of list) {
+      if (!isPositiveInt(task.number)) task.number = ++highest;
+    }
+  }
+
+  for (const project of state.projects) {
+    if (!Array.isArray(project.memberIds)) project.memberIds = [];
+    const maxNumber = (tasksByProject.get(project.id) ?? []).reduce(
+      (m, t) => Math.max(m, t.number),
+      0,
+    );
+    // The counter must also *lead* the highest number in use, not merely be
+    // a positive integer. A stale-but-valid counter (say 2, when a repaired
+    // task above was just assigned 2) would otherwise survive this check and
+    // hand the same number out again on the next createTask — reintroducing
+    // the duplicate identifiers this repair exists to prevent.
+    if (!isPositiveInt(project.nextTaskNumber) || project.nextTaskNumber <= maxNumber) {
+      project.nextTaskNumber = maxNumber + 1;
+    }
+  }
+
   for (const post of state.posts) {
     if (!Array.isArray(post.snapshots)) post.snapshots = [];
-    if (!post.content || typeof post.content !== "object") {
+
+    // `typeof [] === "object"` and an array is truthy, so a bare
+    // truthiness check would let `content: []` — or a partial object
+    // like `{caption}` — through with the remaining fields undefined.
+    // scoreIntrinsic calls .trim() on hook/caption unguarded.
+    if (!isPlainObject(post.content)) {
       post.content = {
         hook: "",
         caption: "",
@@ -347,8 +442,45 @@ export function migrate(input: unknown): WorkspaceState {
         format: "video",
         hasTrendingAudio: false,
       };
-    } else if (!Array.isArray(post.content.hashtags)) {
-      post.content.hashtags = [];
+    } else {
+      const c = post.content;
+      if (typeof c.hook !== "string") c.hook = "";
+      if (typeof c.caption !== "string") c.caption = "";
+      if (typeof c.transcript !== "string") c.transcript = "";
+      if (typeof c.format !== "string") c.format = "video";
+      if (typeof c.hasTrendingAudio !== "boolean") c.hasTrendingAudio = false;
+      if (!Array.isArray(c.hashtags)) c.hashtags = [];
+    }
+
+    // platform / context / threshold are dereferenced unguarded by
+    // scoreIntrinsic and projectThreshold (PROFILES[platform],
+    // ctx.novelty, threshold.window). Leaving them unrepaired wedges the
+    // workspace: PUT /api/workspace accepts the payload and persists it,
+    // then every read that scores the post fails — `doodaboo post list`
+    // scores in a loop, so one bad post takes out the whole command.
+    if (!PLATFORM_IDS.has(post.platform)) post.platform = "tiktok";
+    if (!isPlainObject(post.context)) {
+      post.context = { ...DEFAULT_POST_CONTEXT };
+    } else {
+      const ctx = post.context as unknown as Record<string, unknown>;
+      for (const [k, fallback] of Object.entries(DEFAULT_POST_CONTEXT)) {
+        const v = ctx[k];
+        const ok =
+          typeof fallback === "string"
+            ? typeof v === "string" && v.length > 0
+            : typeof v === "number" && Number.isFinite(v);
+        if (!ok) ctx[k] = fallback;
+      }
+    }
+    if (!isPlainObject(post.threshold)) {
+      post.threshold = { ...DEFAULT_THRESHOLD };
+    } else {
+      const th = post.threshold;
+      if (!THRESHOLD_METRICS.has(th.metric)) th.metric = DEFAULT_THRESHOLD.metric;
+      if (!THRESHOLD_WINDOWS.has(th.window)) th.window = DEFAULT_THRESHOLD.window;
+      if (typeof th.value !== "number" || !Number.isFinite(th.value)) {
+        th.value = DEFAULT_THRESHOLD.value;
+      }
     }
     // Validate snapshot numeric fields. The addSnapshot mutation already
     // guards live writes, but `import` and hand-edited vault files reach

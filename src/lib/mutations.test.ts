@@ -6,6 +6,7 @@ import {
   addSnapshot,
   addUser,
   blankWorkspace,
+  ReferenceNotFoundError,
   createPost,
   createProject,
   createTask,
@@ -30,6 +31,7 @@ import {
   WORKSPACE_VERSION,
   WorkspaceState,
 } from "./mutations";
+import { Post, Task } from "./types";
 
 function fresh(): WorkspaceState {
   return emptyWorkspace();
@@ -964,5 +966,68 @@ describe("restorePost", () => {
     const restored = restorePost(s0, post);
     const matching = restored.posts.filter((p) => p.id === post.id);
     assert.equal(matching.length, 1);
+  });
+});
+
+// ── Patch identity protection ───────────────────────────────────────────────
+//
+// PATCH /api/tasks/:id forwards the request body to updateTask unfiltered, so
+// a patch that carries `id` would splat over the record's own identity and
+// leave two entities sharing one id.
+
+describe("updateTask / updatePost — immutable identity fields", () => {
+  it("ignores an id in the patch instead of creating a duplicate id", () => {
+    const s0 = fresh();
+    const a = s0.tasks[0];
+    const b = s0.tasks[1];
+    const s1 = updateTask(s0, a.id, { id: b.id } as Partial<Task>);
+    assert.equal(
+      s1.tasks.filter((t) => t.id === b.id).length,
+      1,
+      "patching id must not produce two tasks sharing one id",
+    );
+    assert.ok(s1.tasks.find((t) => t.id === a.id), "original task still exists");
+  });
+
+  it("ignores number and projectId in the patch", () => {
+    const s0 = fresh();
+    const a = s0.tasks[0];
+    const s1 = updateTask(s0, a.id, {
+      number: -7,
+      projectId: "ghost",
+      title: "renamed",
+    } as Partial<Task>);
+    const after = s1.tasks.find((t) => t.id === a.id)!;
+    assert.equal(after.number, a.number, "number is not client-writable");
+    assert.equal(after.projectId, a.projectId, "projectId is not client-writable");
+    assert.equal(after.title, "renamed", "ordinary fields still apply");
+  });
+
+  it("ignores an id in a post patch", () => {
+    const s0 = fresh();
+    const a = s0.posts[0];
+    const b = s0.posts[1];
+    const s1 = updatePost(s0, a.id, { id: b.id } as Partial<Post>);
+    assert.equal(s1.posts.filter((p) => p.id === b.id).length, 1);
+    assert.ok(s1.posts.find((p) => p.id === a.id));
+  });
+
+  it("still applies ordinary post fields", () => {
+    const s0 = fresh();
+    const a = s0.posts[0];
+    const s1 = updatePost(s0, a.id, { title: "new title" });
+    assert.equal(s1.posts.find((p) => p.id === a.id)!.title, "new title");
+  });
+});
+
+describe("createTask — unknown project", () => {
+  it("throws ReferenceNotFoundError so the API can map it to 400", () => {
+    const s0 = fresh();
+    assert.throws(
+      () => createTask(s0, { projectId: "nope", title: "x" }),
+      (err: unknown) =>
+        err instanceof ReferenceNotFoundError &&
+        err.name === "ReferenceNotFoundError",
+    );
   });
 });

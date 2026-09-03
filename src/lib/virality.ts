@@ -382,7 +382,12 @@ export function scoreLive(
     ? [...post.snapshots].sort((a, b) => a.atMinutes - b.atMinutes).slice(-2, -1)[0]
     : undefined;
 
-  const tractionFactors = buildTractionFactors(latest, prev, p);
+  const tractionFactors = buildTractionFactors(
+    latest,
+    prev,
+    p,
+    post.context.accountAvgViews,
+  );
   const liveOnly = assemble(tractionFactors, 0.7);
 
   const liveW = p.weights.liveCurve(latest.atMinutes);
@@ -394,19 +399,34 @@ export function scoreLive(
     ...liveOnly.factors.map((f) => ({ ...f, contribution: f.contribution * liveW })),
   ];
 
+  // Band the *rounded* value, the way `assemble` does for intrinsic
+  // scores. Banding the raw value lets a blend in [min - 0.05, min)
+  // display a band's floor number under the lower band's label and
+  // color — e.g. a post rendering "55" (the documented Solid floor)
+  // labelled "Meh", while another post also showing 55 reads "Solid".
+  const value = round(blendedValue);
   return {
-    value: round(blendedValue),
-    band: bandFor(blendedValue),
+    value,
+    band: bandFor(value),
     confidence: clamp(0.45 + 0.5 * liveW),
     factors: merged,
     computedAt: new Date().toISOString(),
   };
 }
 
+/**
+ * Normalized (post-`clamp`) velocity used when a first snapshot has no
+ * baseline to compare against. Expressed after normalization on purpose: a
+ * raw value here would be multiplied by the velocity scale factor below and
+ * clamp back to a perfect 1.0 — the very bug this guards.
+ */
+const VELOCITY_NO_BASELINE = 0.4;
+
 function buildTractionFactors(
   latest: EngagementSnapshot,
   prev: EngagementSnapshot | undefined,
   p: PlatformProfile,
+  accountAvgViews: number,
 ): ScoreFactor[] {
   const impressions = Math.max(latest.impressions, latest.views, 1);
   const shareRate = latest.shares / impressions;
@@ -414,11 +434,28 @@ function buildTractionFactors(
   const er = (latest.likes + latest.comments * 2 + latest.shares * 3) / impressions;
   const retention = (latest.retentionPct ?? 0) / 100;
 
+  // With a prior snapshot this is genuine acceleration: relative view growth
+  // per minute, measured against the previous reading.
+  //
+  // With only one snapshot there is nothing to accelerate against, and the
+  // old expression divided views by itself — `views / atMinutes / views`
+  // cancels to `1 / atMinutes`, so any post under ~8 minutes old scored a
+  // perfect Velocity whether it had 1 view or a million. Instead compare the
+  // accrual rate to what a typical post on this account does: the share of
+  // the account's usual reach captured per minute. Same rate-over-baseline
+  // shape as the two-snapshot branch, using the only baseline available.
+  //
+  // A missing/zero baseline yields a neutral value rather than a perfect one
+  // — mirroring how audienceSize <= 0 is handled elsewhere in this module.
+  const baseline = accountAvgViews;
+  const hasVelocityBaseline = !!prev || baseline > 0;
   const velocity = prev
     ? (latest.views - prev.views) /
       Math.max(latest.atMinutes - prev.atMinutes, 1) /
       Math.max(prev.views || 1, 1)
-    : latest.views / Math.max(latest.atMinutes, 1) / Math.max(latest.views, 1);
+    : baseline > 0
+      ? latest.views / baseline / Math.max(latest.atMinutes, 1)
+      : 0;
 
   const commentDepth = latest.likes > 0
     ? clamp(latest.comments / latest.likes * 5)
@@ -430,7 +467,9 @@ function buildTractionFactors(
     saveRate: clamp(saveRate / 0.04),
     engagementRate: clamp(er / 0.15),
     retention: clamp(retention / 0.6), // 60% retention ~= elite
-    velocity: clamp(velocity * 8),
+    velocity: hasVelocityBaseline
+      ? clamp(velocity * 8)
+      : VELOCITY_NO_BASELINE,
     commentDepth: clamp(commentDepth),
   };
 
@@ -444,7 +483,11 @@ function buildTractionFactors(
     f("retention", "Retention", "traction", norm.retention, p.liveWeights.retention,
       `Average retention ${(retention * 100).toFixed(0)}% — drives algorithmic boost.`),
     f("velocity", "Velocity", "traction", norm.velocity, p.liveWeights.velocity,
-      "How fast views are accelerating between snapshots."),
+      prev
+        ? "How fast views are accelerating between snapshots."
+        : baseline > 0
+          ? "Share of this account's typical reach captured per minute. Acceleration needs a second snapshot."
+          : "No account baseline to compare against — add recent avg views, or a second snapshot."),
     f("commentDepth", "Comment depth", "diffusion", norm.commentDepth, p.liveWeights.commentDepth,
       "Comments-per-like; signals real conversation, not just passive likes."),
   ].filter((x) => x.weight > 0);
@@ -463,7 +506,15 @@ function f(
 }
 
 function assemble(factors: ScoreFactor[], confidence: number): ViralityScore {
-  const value = round(factors.reduce((s, f) => s + f.contribution, 0));
+  // Clamp to the 0..100 scale this module documents. Built-in weights
+  // normalize to 1, but plugin `extraFactors` are appended without
+  // renormalization and each may carry a weight up to 0.5 — i.e. +50 points
+  // on top of a full 100. Without this, GET /api/posts/:id/score could return
+  // 138.4, which ScoreGauge would print above its literal "/100" caption
+  // while computing a negative strokeDashoffset.
+  const value = round(
+    Math.min(100, Math.max(0, factors.reduce((s, f) => s + f.contribution, 0))),
+  );
   return {
     value,
     band: bandFor(value),

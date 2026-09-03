@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
@@ -27,6 +27,29 @@ export function SnapshotForm({
   const retentionId = useId();
   const watchTimeId = useId();
 
+  // The parent recomputes defaultMinutes after each saved snapshot to advance
+  // the suggestion (T+5 -> T+20 -> ...), but useState reads a prop only once
+  // and this component is never remounted. Without this sync the Minute field
+  // stayed at its first value, so the obvious next action filed a second
+  // snapshot at the same atMinutes — which addSnapshot does not dedupe — and
+  // the parent's Math.min(60, last + 15) was dead code.
+  //
+  // The sync only applies while the user hasn't chosen a minute themselves.
+  // The snapshot list can change for reasons other than submitting — deleting
+  // a snapshot from the list on this same page also recomputes the prop — and
+  // blindly following it would silently rewrite a minute the user had typed
+  // while keeping the metrics they entered, recording them at a time they
+  // never picked. Submitting clears the flag so the next suggestion lands.
+  const [minuteChosen, setMinuteChosen] = useState(false);
+  useEffect(() => {
+    if (!minuteChosen) setAtMinutes(defaultMinutes);
+  }, [defaultMinutes, minuteChosen]);
+
+  const chooseMinutes = (m: number) => {
+    setMinuteChosen(true);
+    setAtMinutes(m);
+  };
+
   const submit = () => {
     onAdd({
       atMinutes,
@@ -48,6 +71,8 @@ export function SnapshotForm({
     setSaves(0);
     setRetentionPct("");
     setWatchTimeAvgSec("");
+    // Hand control back to the suggested minute for the next snapshot.
+    setMinuteChosen(false);
   };
 
   return (
@@ -61,7 +86,7 @@ export function SnapshotForm({
             <button
               key={m}
               type="button"
-              onClick={() => setAtMinutes(m)}
+              onClick={() => chooseMinutes(m)}
               className={`h-6 px-2 border-[1.5px] border-ink font-mono text-[10px] uppercase tracking-widest ${
                 atMinutes === m ? "bg-ink text-paper" : "bg-paper"
               }`}
@@ -72,7 +97,7 @@ export function SnapshotForm({
         </div>
       </div>
       <div className="p-3 grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Field label="Minute" value={atMinutes} onChange={setAtMinutes} />
+        <Field label="Minute" value={atMinutes} onChange={chooseMinutes} />
         <Field label="Impressions" value={impressions} onChange={setImpressions} />
         <Field label="Views" value={views} onChange={setViews} />
         <Field label="Likes" value={likes} onChange={setLikes} />
