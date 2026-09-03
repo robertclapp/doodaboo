@@ -18,3 +18,8 @@ src-tauri/gen
 src-tauri/Cargo.lock
 .claude
 
+# Throwaway probe/scratch scripts used to verify behavior against the real
+# source (e.g. __probe.test.ts). They are not part of the suite and must
+# never be committed.
+**/__probe*
+
