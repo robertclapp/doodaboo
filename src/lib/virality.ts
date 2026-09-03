@@ -469,7 +469,15 @@ function f(
 }
 
 function assemble(factors: ScoreFactor[], confidence: number): ViralityScore {
-  const value = round(factors.reduce((s, f) => s + f.contribution, 0));
+  // Clamp to the 0..100 scale this module documents. Built-in weights
+  // normalize to 1, but plugin `extraFactors` are appended without
+  // renormalization and each may carry a weight up to 0.5 — i.e. +50 points
+  // on top of a full 100. Without this, GET /api/posts/:id/score could return
+  // 138.4, which ScoreGauge would print above its literal "/100" caption
+  // while computing a negative strokeDashoffset.
+  const value = round(
+    Math.min(100, Math.max(0, factors.reduce((s, f) => s + f.contribution, 0))),
+  );
   return {
     value,
     band: bandFor(value),
