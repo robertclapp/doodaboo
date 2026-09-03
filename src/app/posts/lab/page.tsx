@@ -71,6 +71,18 @@ export default function HookLabPage() {
     });
   };
 
+  // Variant ids embed the subject slug, and the list is further narrowed by
+  // platform/family — so editing the subject or deselecting a family strands
+  // every previously picked id. Counting raw `picked` then resolving against
+  // the current `variants` let the button read "Compare picked (2)", stay
+  // enabled, and report the *success* toast "Spawned 0 drafts" while
+  // navigating to an empty compare view. Everything user-facing now derives
+  // from the picks that still exist.
+  const pickedVisible = useMemo(
+    () => variants.filter((v) => picked.has(v.id)).map((v) => v.id),
+    [variants, picked],
+  );
+
   const spawnDraft = (hook: string) => {
     const targetPlatform = platform === "all" ? "tiktok" : platform;
     const post = createPost({
@@ -84,13 +96,13 @@ export default function HookLabPage() {
   };
 
   const spawnComparison = () => {
-    if (picked.size < 2) {
+    if (pickedVisible.length < 2) {
       toast.error("Pick at least 2 variants to compare");
       return;
     }
     const targetPlatform = platform === "all" ? "tiktok" : platform;
     const ids: string[] = [];
-    for (const id of picked) {
+    for (const id of pickedVisible) {
       const v = variants.find((x) => x.id === id);
       if (!v) continue;
       const post = createPost({
@@ -126,9 +138,9 @@ export default function HookLabPage() {
             variant="accent"
             iconLeft={<Columns2 size={12} />}
             onClick={spawnComparison}
-            disabled={picked.size < 2}
+            disabled={pickedVisible.length < 2}
           >
-            Compare picked ({picked.size})
+            Compare picked ({pickedVisible.length})
           </Button>
         }
       />

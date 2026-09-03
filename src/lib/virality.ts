@@ -394,9 +394,15 @@ export function scoreLive(
     ...liveOnly.factors.map((f) => ({ ...f, contribution: f.contribution * liveW })),
   ];
 
+  // Band the *rounded* value, the way `assemble` does for intrinsic
+  // scores. Banding the raw value lets a blend in [min - 0.05, min)
+  // display a band's floor number under the lower band's label and
+  // color — e.g. a post rendering "55" (the documented Solid floor)
+  // labelled "Meh", while another post also showing 55 reads "Solid".
+  const value = round(blendedValue);
   return {
-    value: round(blendedValue),
-    band: bandFor(blendedValue),
+    value,
+    band: bandFor(value),
     confidence: clamp(0.45 + 0.5 * liveW),
     factors: merged,
     computedAt: new Date().toISOString(),

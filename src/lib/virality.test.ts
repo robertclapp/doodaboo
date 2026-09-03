@@ -1245,3 +1245,76 @@ describe("recommend — granular message branches", () => {
     assert.match(r.message, /Trim/);
   });
 });
+
+// ── Band/value consistency ─────────────────────────────────────────────────
+//
+// scoreLive used to band the *unrounded* blend while reporting the rounded
+// value, so a blend in [min - 0.05, min) displayed a band's floor number
+// under the lower band's label — e.g. the post detail badge reading "55"
+// (the documented Solid floor) on the Meh color.
+
+describe("scoreLive — displayed value agrees with its band", () => {
+  const livePost = (atMinutes: number, shares: number): Post =>
+    ({
+      id: "po_band",
+      title: "t",
+      platform: "tiktok",
+      status: "live",
+      threshold: { metric: "views", value: 100_000, window: "7d" },
+      content: {
+        hook: "Stop scrolling, this changes everything about your workflow",
+        caption: "A caption with enough substance to score.",
+        hashtags: ["fyp", "build", "design", "tips"],
+        transcript: "",
+        format: "video",
+        durationSec: 21,
+        hasTrendingAudio: true,
+      },
+      context: {
+        audienceSize: 5000,
+        accountAvgViews: 2000,
+        postingHour: 19,
+        dayOfWeek: 3,
+        topicCategory: "design",
+        novelty: 4,
+        emotion: 4,
+        trendMatch: 4,
+        sentiment: "positive",
+      },
+      snapshots: [
+        {
+          id: "s1",
+          capturedAt: "2026-01-01T00:00:00.000Z",
+          atMinutes,
+          impressions: 10_000,
+          views: 10_000,
+          likes: 500,
+          comments: 40,
+          shares,
+          saves: 80,
+          retentionPct: 40,
+        },
+      ],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }) as Post;
+
+  const bandOfValue = (v: number) =>
+    [...SCORE_BANDS].reverse().find((b) => v >= b.min)!.id;
+
+  it("never labels a score with a band the displayed value contradicts", () => {
+    // Sweep a range of blends; each result's band must be the band its own
+    // rounded value falls into.
+    for (let at = 5; at <= 60; at += 5) {
+      for (let shares = 0; shares <= 40; shares += 1) {
+        const live = scoreLive(livePost(at, shares));
+        assert.ok(live);
+        assert.equal(
+          live!.band,
+          bandOfValue(live!.value),
+          `value ${live!.value} labelled ${live!.band}, but ${live!.value} is ${bandOfValue(live!.value)}`,
+        );
+      }
+    }
+  });
+});

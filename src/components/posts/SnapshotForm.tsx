@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
@@ -26,6 +26,18 @@ export function SnapshotForm({
   const [watchTimeAvgSec, setWatchTimeAvgSec] = useState<string>("");
   const retentionId = useId();
   const watchTimeId = useId();
+
+  // The parent recomputes defaultMinutes after each saved snapshot to advance
+  // the suggestion (T+5 -> T+20 -> ...), but useState reads a prop only once
+  // and this component is never remounted. Without this sync the Minute field
+  // stayed at its first value, so the obvious next action filed a second
+  // snapshot at the same atMinutes — which addSnapshot does not dedupe — and
+  // the parent's Math.min(60, last + 15) was dead code. Syncing on change is
+  // safe: the prop only changes when the snapshot list does, i.e. after a
+  // submit, never while the user is typing.
+  useEffect(() => {
+    setAtMinutes(defaultMinutes);
+  }, [defaultMinutes]);
 
   const submit = () => {
     onAdd({
