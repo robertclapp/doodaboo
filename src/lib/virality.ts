@@ -382,7 +382,12 @@ export function scoreLive(
     ? [...post.snapshots].sort((a, b) => a.atMinutes - b.atMinutes).slice(-2, -1)[0]
     : undefined;
 
-  const tractionFactors = buildTractionFactors(latest, prev, p);
+  const tractionFactors = buildTractionFactors(
+    latest,
+    prev,
+    p,
+    post.context.accountAvgViews,
+  );
   const liveOnly = assemble(tractionFactors, 0.7);
 
   const liveW = p.weights.liveCurve(latest.atMinutes);
@@ -409,10 +414,19 @@ export function scoreLive(
   };
 }
 
+/**
+ * Normalized (post-`clamp`) velocity used when a first snapshot has no
+ * baseline to compare against. Expressed after normalization on purpose: a
+ * raw value here would be multiplied by the velocity scale factor below and
+ * clamp back to a perfect 1.0 — the very bug this guards.
+ */
+const VELOCITY_NO_BASELINE = 0.4;
+
 function buildTractionFactors(
   latest: EngagementSnapshot,
   prev: EngagementSnapshot | undefined,
   p: PlatformProfile,
+  accountAvgViews: number,
 ): ScoreFactor[] {
   const impressions = Math.max(latest.impressions, latest.views, 1);
   const shareRate = latest.shares / impressions;
@@ -420,11 +434,28 @@ function buildTractionFactors(
   const er = (latest.likes + latest.comments * 2 + latest.shares * 3) / impressions;
   const retention = (latest.retentionPct ?? 0) / 100;
 
+  // With a prior snapshot this is genuine acceleration: relative view growth
+  // per minute, measured against the previous reading.
+  //
+  // With only one snapshot there is nothing to accelerate against, and the
+  // old expression divided views by itself — `views / atMinutes / views`
+  // cancels to `1 / atMinutes`, so any post under ~8 minutes old scored a
+  // perfect Velocity whether it had 1 view or a million. Instead compare the
+  // accrual rate to what a typical post on this account does: the share of
+  // the account's usual reach captured per minute. Same rate-over-baseline
+  // shape as the two-snapshot branch, using the only baseline available.
+  //
+  // A missing/zero baseline yields a neutral value rather than a perfect one
+  // — mirroring how audienceSize <= 0 is handled elsewhere in this module.
+  const baseline = accountAvgViews;
+  const hasVelocityBaseline = !!prev || baseline > 0;
   const velocity = prev
     ? (latest.views - prev.views) /
       Math.max(latest.atMinutes - prev.atMinutes, 1) /
       Math.max(prev.views || 1, 1)
-    : latest.views / Math.max(latest.atMinutes, 1) / Math.max(latest.views, 1);
+    : baseline > 0
+      ? latest.views / baseline / Math.max(latest.atMinutes, 1)
+      : 0;
 
   const commentDepth = latest.likes > 0
     ? clamp(latest.comments / latest.likes * 5)
@@ -436,7 +467,9 @@ function buildTractionFactors(
     saveRate: clamp(saveRate / 0.04),
     engagementRate: clamp(er / 0.15),
     retention: clamp(retention / 0.6), // 60% retention ~= elite
-    velocity: clamp(velocity * 8),
+    velocity: hasVelocityBaseline
+      ? clamp(velocity * 8)
+      : VELOCITY_NO_BASELINE,
     commentDepth: clamp(commentDepth),
   };
 
@@ -450,7 +483,11 @@ function buildTractionFactors(
     f("retention", "Retention", "traction", norm.retention, p.liveWeights.retention,
       `Average retention ${(retention * 100).toFixed(0)}% — drives algorithmic boost.`),
     f("velocity", "Velocity", "traction", norm.velocity, p.liveWeights.velocity,
-      "How fast views are accelerating between snapshots."),
+      prev
+        ? "How fast views are accelerating between snapshots."
+        : baseline > 0
+          ? "Share of this account's typical reach captured per minute. Acceleration needs a second snapshot."
+          : "No account baseline to compare against — add recent avg views, or a second snapshot."),
     f("commentDepth", "Comment depth", "diffusion", norm.commentDepth, p.liveWeights.commentDepth,
       "Comments-per-like; signals real conversation, not just passive likes."),
   ].filter((x) => x.weight > 0);

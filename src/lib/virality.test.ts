@@ -1318,3 +1318,99 @@ describe("scoreLive — displayed value agrees with its band", () => {
     }
   });
 });
+
+// ── Velocity on a first snapshot ────────────────────────────────────────────
+//
+// `views / atMinutes / views` cancelled to `1 / atMinutes`, so any post under
+// ~8 minutes old scored a perfect Velocity regardless of how many views it
+// had — 16% of the live weight on tiktok, awarded on no information.
+
+describe("scoreLive — single-snapshot velocity", () => {
+  const p = (views: number, atMinutes: number, accountAvgViews = 2000): Post =>
+    ({
+      id: "po_vel",
+      title: "t",
+      platform: "tiktok",
+      status: "live",
+      threshold: { metric: "views", value: 100_000, window: "7d" },
+      content: {
+        hook: "h",
+        caption: "c",
+        hashtags: [],
+        transcript: "",
+        format: "video",
+        durationSec: 21,
+        hasTrendingAudio: false,
+      },
+      context: {
+        audienceSize: 5000,
+        accountAvgViews,
+        postingHour: 19,
+        dayOfWeek: 3,
+        topicCategory: "d",
+        novelty: 3,
+        emotion: 3,
+        trendMatch: 3,
+        sentiment: "neutral",
+      },
+      snapshots: [
+        {
+          id: "s",
+          capturedAt: "2026-01-01T00:00:00.000Z",
+          atMinutes,
+          impressions: views,
+          views,
+          likes: 10,
+          comments: 1,
+          shares: 1,
+          saves: 1,
+        },
+      ],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }) as Post;
+
+  const velocity = (post: Post) =>
+    scoreLive(post)!.factors.find((f) => f.id === "velocity")!;
+
+  it("depends on view count instead of cancelling it out", () => {
+    for (const at of [5, 8, 30]) {
+      const few = velocity(p(1, at)).raw;
+      const many = velocity(p(1_000_000, at)).raw;
+      assert.ok(
+        few < many,
+        `at=${at}: 1 view (${few}) must not score like 1M views (${many})`,
+      );
+    }
+  });
+
+  it("does not hand a fresh post a perfect velocity for one view", () => {
+    assert.ok(velocity(p(1, 5)).raw < 0.5);
+  });
+
+  it("is neutral, not perfect, when the account has no baseline", () => {
+    // A raw neutral would be multiplied by the velocity scale and clamp back
+    // to 1.0, so this guards the normalized value specifically.
+    const raw = velocity(p(1000, 5, 0)).raw;
+    assert.ok(raw > 0 && raw < 1, `expected a neutral value, got ${raw}`);
+  });
+
+  it("still measures acceleration once a second snapshot exists", () => {
+    const base = p(1000, 30);
+    const accelerating = {
+      ...base,
+      snapshots: [
+        { ...base.snapshots[0], id: "s0", atMinutes: 5, views: 100, impressions: 100 },
+        base.snapshots[0],
+      ],
+    } as Post;
+    const flat = {
+      ...base,
+      snapshots: [
+        { ...base.snapshots[0], id: "s0", atMinutes: 5, views: 1000, impressions: 1000 },
+        base.snapshots[0],
+      ],
+    } as Post;
+    assert.ok(velocity(accelerating).raw > velocity(flat).raw);
+  });
+});
