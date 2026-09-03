@@ -118,6 +118,7 @@ serves the same policy.
 | `NEXT_PUBLIC_SITE_URL` | recommended | Used by `app/sitemap.ts`, `app/robots.ts`, `app/manifest.ts`, and `metadataBase`. Defaults let previews work unconfigured. |
 | `NEXT_PUBLIC_DEMO_POSTS` | no | Set to `false` so fresh workspaces start with an empty Posts surface (see Roadmap → Done). Build-time flag. |
 | `DOODABOO_VAULT` | no | Server-side vault path for the HTTP API's persistence. Only needed if you use the API as a backend; the web app itself is localStorage-first. |
+| `DOODABOO_API_TOKEN` | **yes in production** | Bearer token for the HTTP API. Every `/api/*` route except `/api/health` requires it. **Without it a production deployment refuses all API requests with 503** — the routes read and write the entire workspace, so an unauthenticated public URL would expose it. Unset locally, the API stays open for dev and tests. See [docs/api.md](docs/api.md#authentication). |
 
 ### Railway
 
@@ -143,6 +144,20 @@ set `DOODABOO_VAULT=/data/vault`, and the HTTP API under `/api/*`
 reads/writes a real on-disk vault that survives redeploys — same
 format the CLI and desktop app use. Check `/api/health` to confirm the
 vault is detected.
+
+**Set `DOODABOO_API_TOKEN` if you use the API at all.** Those routes read
+and write the whole workspace, so on a public URL they need a credential —
+doubly so once a volume makes the data persistent. A production deployment
+without the token refuses every `/api/*` request with `503` rather than
+serving the workspace openly:
+
+```bash
+railway variables --set DOODABOO_API_TOKEN="$(openssl rand -hex 32)"
+```
+
+`/api/health` stays open so the healthcheck keeps working. The web UI is
+localStorage-first and never calls the API, so this doesn't affect browsing
+the app.
 
 ### Vercel
 

@@ -13,8 +13,36 @@ All routes:
 - never cache (`Cache-Control: no-store`),
 - emit `{ "error": "..." }` bodies on non-2xx responses.
 
-Auth is intentionally absent — bind to `127.0.0.1` for personal use, or
-put a reverse proxy with auth in front for shared network exposure.
+## Authentication
+
+Set `DOODABOO_API_TOKEN` and every route except `/api/health` requires a
+bearer token:
+
+```bash
+curl -H "Authorization: Bearer $DOODABOO_API_TOKEN" \
+  https://your-app.up.railway.app/api/workspace
+```
+
+Responses are `401` with `WWW-Authenticate: Bearer realm="doodaboo"` when
+the token is missing or wrong. Error bodies never include workspace data.
+
+**The token is required in production.** With `NODE_ENV=production` and no
+`DOODABOO_API_TOKEN`, the API refuses every request with `503` and a message
+naming the variable. That is deliberate: these routes read and write the
+whole workspace, so a deployment with a persistent vault volume would
+otherwise let anyone with the URL dump it via `GET /api/workspace` or replace
+it with `PUT`. Failing loudly beats a silent open door.
+
+Locally (`npm run dev`, tests, `doodaboo serve` against your own vault) the
+API stays open when no token is set, so nothing changes for personal use.
+
+`/api/health` is always reachable without credentials — Railway's healthcheck
+cannot present a token, and a deploy that 401s its own healthcheck never goes
+live. It exposes no workspace data.
+
+Enforcement lives in `src/middleware.ts` (matching `/api/:path*`) rather than
+in each route, so a newly added route is protected by default; the policy
+itself is in `src/lib/api-auth.ts`.
 
 ## Endpoints
 
