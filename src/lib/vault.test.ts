@@ -1,5 +1,6 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { PLATFORMS } from "./types";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -508,5 +509,112 @@ describe("watchWorkspace", () => {
     const stop = watchWorkspace(() => {}, root);
     assert.equal(typeof stop, "function");
     assert.doesNotThrow(() => stop());
+  });
+});
+
+// ── migrate hardening: the trust boundary's own contract ────────────────────
+//
+// migrate is documented as backfilling "structurally incomplete records so
+// downstream code can assume" the invariants hold. These cases are payloads
+// that reached the boundary and escaped it broken.
+
+describe("migrate — task/project numbering", () => {
+  it("backfills a task with no number instead of poisoning the counter", () => {
+    const s = migrate({
+      version: 1,
+      projects: [{ id: "p1", name: "P", key: "WEB", memberIds: [] }],
+      tasks: [{ id: "t1", projectId: "p1", title: "x" }],
+    });
+    // Math.max(0, undefined) is NaN, and typeof NaN === "number" means the
+    // repair branch would never fire again: every later task renders WEB-NaN.
+    assert.ok(Number.isInteger(s.tasks[0].number), "task.number must be an int");
+    assert.ok(Number.isInteger(s.projects[0].nextTaskNumber));
+    assert.ok(s.projects[0].nextTaskNumber > s.tasks[0].number - 1);
+  });
+
+  it("continues numbering from the highest sound number already used", () => {
+    const s = migrate({
+      version: 1,
+      projects: [{ id: "p1", name: "P", key: "WEB", memberIds: [] }],
+      tasks: [
+        { id: "t1", projectId: "p1", title: "a", number: 7 },
+        { id: "t2", projectId: "p1", title: "b" },
+      ],
+    });
+    assert.equal(s.tasks[0].number, 7);
+    assert.equal(s.tasks[1].number, 8);
+    assert.equal(s.projects[0].nextTaskNumber, 9);
+  });
+
+  it("repairs a NaN nextTaskNumber rather than trusting typeof", () => {
+    const s = migrate({
+      version: 1,
+      projects: [
+        { id: "p1", name: "P", key: "WEB", memberIds: [], nextTaskNumber: NaN },
+      ],
+      tasks: [{ id: "t1", projectId: "p1", title: "a", number: 3 }],
+    });
+    assert.equal(s.projects[0].nextTaskNumber, 4);
+  });
+});
+
+describe("migrate — post shape completeness", () => {
+  const bare = (extra: Record<string, unknown> = {}) => ({
+    version: 1,
+    posts: [{ id: "po_x", title: "t", platform: "tiktok", snapshots: [], ...extra }],
+  });
+
+  it("backfills context and threshold so the scorers cannot crash", () => {
+    const p = migrate(bare()).posts[0];
+    // scoreIntrinsic reads ctx.novelty and projectThreshold reads
+    // threshold.window, both unguarded.
+    assert.equal(typeof p.context.novelty, "number");
+    assert.equal(typeof p.context.postingHour, "number");
+    assert.equal(typeof p.threshold.window, "string");
+    assert.equal(typeof p.threshold.value, "number");
+  });
+
+  it("repairs content: [] (an array is truthy and typeof 'object')", () => {
+    const p = migrate(bare({ content: [] })).posts[0];
+    assert.equal(Array.isArray(p.content), false);
+    assert.equal(typeof p.content.hook, "string");
+    assert.ok(Array.isArray(p.content.hashtags));
+  });
+
+  it("completes a partial content object field by field", () => {
+    const p = migrate(bare({ content: { caption: "hi" } })).posts[0];
+    assert.equal(p.content.caption, "hi");
+    assert.equal(typeof p.content.hook, "string");
+    assert.equal(typeof p.content.format, "string");
+  });
+
+  it("replaces an unknown platform with a scorable one", () => {
+    const p = migrate(bare({ platform: "myspace" })).posts[0];
+    assert.ok(PLATFORMS.some((x) => x.id === p.platform));
+  });
+
+  it("keeps a partial context's valid fields", () => {
+    const p = migrate(bare({ context: { novelty: 5 } })).posts[0];
+    assert.equal(p.context.novelty, 5);
+    assert.equal(typeof p.context.emotion, "number");
+  });
+});
+
+describe("migrate — corrupt members throw VaultCorruptError", () => {
+  it("rejects a null member rather than escaping a raw TypeError", () => {
+    for (const key of ["users", "labels", "projects", "tasks", "posts"]) {
+      assert.throws(
+        () => migrate({ version: 1, [key]: [null] }),
+        (err: unknown) => err instanceof VaultCorruptError,
+        `${key}: [null] should throw VaultCorruptError`,
+      );
+    }
+  });
+
+  it("rejects a primitive member", () => {
+    assert.throws(
+      () => migrate({ version: 1, tasks: ["nope"] }),
+      (err: unknown) => err instanceof VaultCorruptError,
+    );
   });
 });

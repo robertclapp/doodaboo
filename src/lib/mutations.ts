@@ -48,6 +48,20 @@ export interface WorkspaceState {
 export const WORKSPACE_VERSION = 1 as const;
 
 /**
+ * A mutation referenced an entity that does not exist (e.g. creating a task
+ * under an unknown project). This is a *client* error: the API layer maps it
+ * to 400 by name, the way it already does for VaultNotFoundError. Throwing a
+ * bare Error instead would fall through to the unhandled branch and report a
+ * caller's mistake as a 500 — while noisily logging to console.error.
+ */
+export class ReferenceNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReferenceNotFoundError";
+  }
+}
+
+/**
  * The seeded demo workspace. Despite the historical name this is the
  * full demo dataset, not a blank slate — see blankWorkspace() for that.
  *
@@ -97,6 +111,34 @@ export function blankWorkspace(): WorkspaceState {
 }
 
 const nowIso = () => new Date().toISOString();
+
+/**
+ * Fields a patch may never rewrite.
+ *
+ * `updateTask`/`updatePost` splat the caller's patch over the record, and
+ * `PATCH /api/tasks/:id` forwards the request body unfiltered — so without
+ * this a client could set `id` to another record's id, producing two
+ * entities sharing one id. That breaks the uniqueness every find/filter in
+ * the codebase assumes, makes the route return 200 with an empty body (its
+ * `find(...)!` no longer matches the id it was given), and turns a later
+ * DELETE of that id into silent collateral deletion of both records.
+ *
+ * `number` and `projectId` are frozen for the same reason: task numbers are
+ * allocated per project, so moving a task across projects (or forcing a
+ * number) collides with an existing KEY-N identifier. A genuine move would
+ * need to renumber, which is a different operation than a field patch.
+ */
+const TASK_IDENTITY_FIELDS = ["id", "number", "projectId", "createdAt"] as const;
+const POST_IDENTITY_FIELDS = ["id", "createdAt"] as const;
+
+function stripIdentity<T extends object>(
+  patch: T,
+  fields: readonly string[],
+): Partial<T> {
+  const out = { ...(patch as Record<string, unknown>) };
+  for (const f of fields) delete out[f];
+  return out as Partial<T>;
+}
 
 // ── Users ───────────────────────────────────────────────────────────────────
 
@@ -265,7 +307,9 @@ export function createTask(
 ): { state: WorkspaceState; task: Task } {
   const project = state.projects.find((p) => p.id === data.projectId);
   if (!project) {
-    throw new Error(`Cannot create task: project ${data.projectId} not found`);
+    throw new ReferenceNotFoundError(
+      `Cannot create task: project ${data.projectId} not found`,
+    );
   }
   const number = project.nextTaskNumber;
   const actor = ctx.actorId ?? state.currentUserId;
@@ -362,7 +406,7 @@ export function updateTask(
       t.id === id
         ? {
             ...t,
-            ...patch,
+            ...stripIdentity(patch, TASK_IDENTITY_FIELDS),
             updatedAt: nowIso(),
             activity: [...t.activity, ...entries],
           }
@@ -496,7 +540,9 @@ export function updatePost(
   return {
     ...state,
     posts: state.posts.map((p) =>
-      p.id === id ? { ...p, ...patch, updatedAt: nowIso() } : p,
+      p.id === id
+        ? { ...p, ...stripIdentity(patch, POST_IDENTITY_FIELDS), updatedAt: nowIso() }
+        : p,
     ),
   };
 }
