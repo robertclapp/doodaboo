@@ -118,7 +118,7 @@ serves the same policy.
 | `NEXT_PUBLIC_SITE_URL` | recommended | Used by `app/sitemap.ts`, `app/robots.ts`, `app/manifest.ts`, and `metadataBase`. Defaults let previews work unconfigured. |
 | `NEXT_PUBLIC_DEMO_POSTS` | no | Set to `false` so fresh workspaces start with an empty Posts surface (see Roadmap → Done). Build-time flag. |
 | `DOODABOO_VAULT` | no | Server-side vault path for the HTTP API's persistence. Only needed if you use the API as a backend; the web app itself is localStorage-first. |
-| `DOODABOO_API_TOKEN` | **yes in production** | Bearer token for the HTTP API. Every `/api/*` route except `/api/health` requires it. **Without it a production deployment refuses all API requests with 503** — the routes read and write the entire workspace, so an unauthenticated public URL would expose it. Unset locally, the API stays open for dev and tests. See [docs/api.md](docs/api.md#authentication). |
+| `DOODABOO_API_TOKEN` | **yes in production** | Bearer token for the HTTP API. Every `/api/*` route except `/api/health` requires it. **Without it a production deployment refuses all API requests with 503** — the routes read and write the entire workspace, so an unauthenticated public URL would expose it. Unset locally, the API stays open for dev, tests, and `doodaboo serve` on `127.0.0.1`. See [docs/api.md](docs/api.md#authentication). |
 
 ### Railway
 

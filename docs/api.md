@@ -33,8 +33,15 @@ whole workspace, so a deployment with a persistent vault volume would
 otherwise let anyone with the URL dump it via `GET /api/workspace` or replace
 it with `PUT`. Failing loudly beats a silent open door.
 
-Locally (`npm run dev`, tests, `doodaboo serve` against your own vault) the
-API stays open when no token is set, so nothing changes for personal use.
+Locally (`npm run dev`, tests) the API stays open when no token is set, so
+nothing changes for personal use. `doodaboo serve` is a special case: it
+runs `next start`, which always reports production, so when bound to a
+loopback address (the default `127.0.0.1`) the CLI marks that process local
+with `DOODABOO_API_LOCAL=1` and it stays open too. Nothing else sets that
+variable, and a deployment never should. With `--host` set to anything else
+the API is reachable over the network, so `serve` refuses to start until
+`DOODABOO_API_TOKEN` is set — a configured token is always enforced, local
+or not.
 
 `/api/health` is always reachable without credentials — Railway's healthcheck
 cannot present a token, and a deploy that 401s its own healthcheck never goes

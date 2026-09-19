@@ -109,10 +109,18 @@ doodaboo post score po_brutalist_drop --json | jq '.factors[] | {label, contribu
 
 `doodaboo serve` boots the Next.js production server with
 `DOODABOO_VAULT` pre-set, so the web UI and the API routes operate on
-the same vault the CLI just edited. Run it on `127.0.0.1` for personal
-use, or behind a reverse proxy on a private network for shared access.
+the same vault the CLI just edited.
+
+Bound to `127.0.0.1` (the default) the HTTP API is open — nothing off this
+machine can reach it, and the CLI marks the process local so the
+production-mode token requirement does not apply. Bind to any other
+address (`--host 0.0.0.0` for a private network, say) and the API is
+reachable over the network, so `serve` refuses to start until
+`DOODABOO_API_TOKEN` is set; see [docs/api.md](api.md#authentication).
 
 ```bash
 doodaboo serve --port=3100
 # http://127.0.0.1:3100
+
+DOODABOO_API_TOKEN="$(openssl rand -hex 32)" doodaboo serve --host=0.0.0.0
 ```
