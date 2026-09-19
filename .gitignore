@@ -22,3 +22,6 @@ src-tauri/gen
 # never be committed.
 **/__probe*
 
+
+# scripts/build-tauri.mjs parks server-only routes here during a static export
+.tauri-build-stash
