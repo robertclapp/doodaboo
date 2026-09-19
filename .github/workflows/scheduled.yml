@@ -145,11 +145,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          # src-tauri/Cargo.lock is gitignored, so hashFiles wouldn't see
-          # it; if we ever commit it we can add it back. Hash the npm
-          # lockfile too so a JS-only dep change still invalidates the
-          # Rust build's incremental target dir.
-          key: tauri-${{ matrix.platform.target }}-${{ hashFiles('src-tauri/Cargo.toml', 'package-lock.json') }}
+          # Hash the Rust lockfile (now committed) so a dependency change
+          # invalidates the incremental target dir, and the npm lockfile
+          # too so a JS-only dep change does as well.
+          key: tauri-${{ matrix.platform.target }}-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml', 'package-lock.json') }}
 
       - name: Install Linux system deps
         if: matrix.platform.runner == 'ubuntu-22.04'
