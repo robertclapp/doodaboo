@@ -15,7 +15,6 @@ test-results
 playwright-results.json
 src-tauri/target
 src-tauri/gen
-src-tauri/Cargo.lock
 .claude
 
 # Throwaway probe/scratch scripts used to verify behavior against the real

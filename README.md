@@ -46,7 +46,7 @@ lifecycle events.
 
 ## Stack
 
-- Next.js 14 App Router
+- Next.js 15 App Router
 - React 18, TypeScript strict
 - Tailwind CSS with brutalist token palette
 - Zustand 4 with `persist` middleware (localStorage)
