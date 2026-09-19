@@ -75,13 +75,20 @@ on Git stay readable.
 
 ## Icons
 
-Drop branded icons into `src-tauri/icons/` then regenerate:
+The source of truth is `src-tauri/app-icon.svg` — the web favicon's
+monospace "D" on ink, drawn as paths so it rasterizes without any font.
+Every platform-specific size under `src-tauri/icons/` (desktop PNG/ICNS/ICO,
+Android mipmaps, iOS AppIcon set) is generated from it and committed, because
+`tauri::generate_context!()` reads `icons/icon.png` at compile time and the
+crate will not even `cargo check` without it.
+
+To change the icon, edit the SVG and regenerate:
 
 ```bash
-npx @tauri-apps/cli icon path/to/icon.png
+npx tauri icon src-tauri/app-icon.svg --ios-color '#0a0a0a'
 ```
 
-This populates every platform-specific size Tauri's bundler expects.
+`--ios-color` fills the iOS icon's background, which must be opaque.
 
 ## Roadmap
 
