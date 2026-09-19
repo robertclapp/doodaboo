@@ -15,8 +15,10 @@
  *     data.
  *   - With DOODABOO_API_TOKEN set, every other route requires
  *     `Authorization: Bearer <token>`.
- *   - With it unset, the API stays open in development (local dev, tests, and
- *     `doodaboo serve` against your own vault) but is refused in production.
+ *   - With it unset, the API stays open in development, and for
+ *     `doodaboo serve` bound to a loopback address (the CLI marks that
+ *     process local via DOODABOO_API_LOCAL=1 — nothing else sets it, and a
+ *     deployment never should). Any other production process is refused.
  *     Failing closed matters more than convenience once the process is
  *     listening on a public URL, and the failure is loud and self-describing
  *     rather than a silent open door.
@@ -40,6 +42,13 @@ export interface AuthInput {
   token: string | undefined;
   /** Whether this process is running as a production deployment. */
   isProduction: boolean;
+  /**
+   * True only when `doodaboo serve` started this process bound to a loopback
+   * address (DOODABOO_API_LOCAL=1). `next start` always reports production,
+   * so without this the documented local server would be refused as if it
+   * were a public deployment. Never honored once a token is configured.
+   */
+  localServe?: boolean;
 }
 
 /** True for routes that must stay reachable without credentials. */
@@ -61,7 +70,7 @@ export function authorizeApiRequest(input: AuthInput): AuthDecision {
 
   const configured = input.token?.trim();
   if (!configured) {
-    if (!input.isProduction) return { ok: true };
+    if (!input.isProduction || input.localServe) return { ok: true };
     return {
       ok: false,
       status: 503,

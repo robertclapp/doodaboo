@@ -155,3 +155,30 @@ describe("constantTimeEquals", () => {
     assert.equal(constantTimeEquals(secret, differsLast), false);
   });
 });
+
+describe("authorizeApiRequest — local serve mode", () => {
+  // `doodaboo serve` spawns `next start`, which always reports production.
+  // Bound to loopback it sets DOODABOO_API_LOCAL=1 so the documented local
+  // server is not refused as if it were a public deployment.
+  it("stays open in production when marked local and no token is set", () => {
+    assert.deepEqual(
+      req({ isProduction: true, localServe: true }),
+      { ok: true },
+    );
+  });
+
+  it("still enforces a configured token even when marked local", () => {
+    const d = req({ isProduction: true, localServe: true, token: "t0k" });
+    assert.equal(d.ok, false);
+    assert.equal(d.ok === false && d.status, 401);
+    assert.deepEqual(
+      req({ isProduction: true, localServe: true, token: "t0k", authorization: "Bearer t0k" }),
+      { ok: true },
+    );
+  });
+
+  it("does not affect an unmarked production process", () => {
+    const d = req({ isProduction: true, localServe: false });
+    assert.equal(d.ok === false && d.status, 503);
+  });
+});

@@ -19,6 +19,8 @@ export function middleware(req: NextRequest): NextResponse {
     authorization: req.headers.get("authorization"),
     token: process.env.DOODABOO_API_TOKEN,
     isProduction: process.env.NODE_ENV === "production",
+    // Set only by `doodaboo serve` when bound to loopback (cli/commands/serve.ts).
+    localServe: process.env.DOODABOO_API_LOCAL === "1",
   });
 
   if (decision.ok) return NextResponse.next();
