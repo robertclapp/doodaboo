@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { useIdParam } from "@/lib/route-hooks";
 import { PageHeader, Tab } from "@/components/PageHeader";
 import { AvatarStack } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
@@ -18,8 +19,18 @@ import { formatDateShort } from "@/lib/utils";
 import { LayoutGrid, List, Search, Trash2 } from "lucide-react";
 import { useConfirm, useToast } from "@/components/ToastProvider";
 
-export default function ProjectDetailPage() {
-  const { projectId } = useParams<{ projectId: string }>();
+export default function ProjectViewPage() {
+  // useIdParam reads the query string; Next 15 requires a Suspense boundary
+  // around any page that does. See src/lib/routes.ts.
+  return (
+    <Suspense fallback={null}>
+      <ProjectDetailPage />
+    </Suspense>
+  );
+}
+
+function ProjectDetailPage() {
+  const projectId = useIdParam();
   const router = useRouter();
   const project = useStore((s) => s.projects.find((p) => p.id === projectId));
   const tasks = useStore((s) =>

@@ -96,6 +96,13 @@ function park() {
 const repaired = restore();
 if (repaired) log(`restored ${repaired} path(s) left parked by an interrupted run`);
 
+// `npm run tauri:restore`: repair the tree after a build that was killed
+// hard (SIGKILL, power loss) without also running a build.
+if (process.argv.includes("--restore-only")) {
+  log(repaired ? "tree repaired" : "nothing was parked; tree already clean");
+  process.exit(0);
+}
+
 let restoredOnExit = false;
 const restoreOnce = () => {
   if (restoredOnExit) return;
@@ -127,7 +134,45 @@ const result = spawnSync("npx", ["next", "build"], {
 restoreOnce();
 
 if (result.status !== 0) fail(`next build exited with ${result.status ?? "signal"}`);
-if (!existsSync(path.join(root, "out", "index.html"))) {
-  fail("next build succeeded but produced no out/index.html — is output:'export' gated on DOODABOO_STATIC_EXPORT in next.config.mjs?");
-}
+validateOut();
 log("static bundle ready in ./out");
+
+/**
+ * The bundle is only as good as what Tauri can resolve from it, so assert
+ * the shape rather than trusting a zero exit code:
+ *   - every page the app links to exists as a file (Tauri's resolver falls
+ *     back to index.html for anything missing — silently rendering the
+ *     dashboard at the wrong URL instead of failing);
+ *   - no dynamic-segment or placeholder page leaked in (`[id]`, `_.html`),
+ *     which would mean a route regressed to a shape the export can't serve;
+ *   - no server-only surface was built (the API would be dead weight);
+ *   - every parked path is back in the tree.
+ */
+function validateOut() {
+  const out = path.join(root, "out");
+  const pages = [
+    "index.html", "index.txt", "404.html",
+    "inbox.html", "my-issues.html", "team.html", "labels.html", "settings.html",
+    "posts.html", "posts/view.html", "posts/view.txt", "posts/new.html",
+    "posts/lab.html", "posts/insights.html", "posts/compare.html",
+    "projects.html", "projects/view.html", "projects/new.html",
+    "tasks/view.html", "playbooks.html", "playbooks/view.html",
+  ];
+  const missing = pages.filter((p) => !existsSync(path.join(out, p)));
+  if (missing.length) fail(`export is missing expected page(s): ${missing.join(", ")}`);
+
+  const leaked = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir, { withFileTypes: true })) {
+      const rel = path.relative(out, path.join(dir, name.name));
+      if (/\[[^\]]+\]/.test(rel) || /(^|\/)_\.html$/.test(rel) || /^api(\/|$)/.test(rel)) leaked.push(rel);
+      if (name.isDirectory()) walk(path.join(dir, name.name));
+    }
+  };
+  walk(out);
+  if (leaked.length) fail(`export contains paths the app can't serve under Tauri: ${leaked.join(", ")}`);
+
+  const notRestored = SERVER_ONLY.filter((rel) => !existsSync(path.join(root, rel)));
+  if (notRestored.length) fail(`server-only path(s) not restored after build: ${notRestored.join(", ")}`);
+  log(`validated ${pages.length} pages, no leaked dynamic/API paths, tree restored`);
+}

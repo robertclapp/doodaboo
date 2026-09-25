@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
-import { useParams } from "next/navigation";
+import { Suspense, useMemo } from "react";
+import { useIdParam } from "@/lib/route-hooks";
 import { ArrowLeft, BookOpen } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { PlatformIcon } from "@/components/posts/PlatformIcon";
@@ -10,10 +10,21 @@ import { useStore } from "@/lib/store";
 import { useHydrated } from "@/lib/hooks";
 import { getPlaybook } from "@/lib/playbooks";
 import { describeBand, scoreIntrinsic, scoreLive } from "@/lib/virality";
+import { routes } from "@/lib/routes";
 
-export default function PlaybookDetailPage() {
+export default function PlaybookViewPage() {
+  // useIdParam reads the query string; Next 15 requires a Suspense boundary
+  // around any page that does. See src/lib/routes.ts.
+  return (
+    <Suspense fallback={null}>
+      <PlaybookDetailPage />
+    </Suspense>
+  );
+}
+
+function PlaybookDetailPage() {
   const hydrated = useHydrated();
-  const { playbookId } = useParams<{ playbookId: string }>();
+  const playbookId = useIdParam();
   const playbook = getPlaybook(playbookId);
   const posts = useStore((s) => s.posts);
 
@@ -177,7 +188,7 @@ export default function PlaybookDetailPage() {
                         {score.value.toFixed(0)}
                       </span>
                       <Link
-                        href={`/posts/${p.id}`}
+                        href={routes.post(p.id)}
                         className="truncate text-sm hover:underline"
                       >
                         {p.title || "Untitled"}

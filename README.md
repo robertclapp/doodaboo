@@ -66,13 +66,15 @@ npm run dev
 | --- | --- |
 | `npm run dev` | Local dev server with hot reload. |
 | `npm run build` | Production build. |
+| `npm run build:tauri` | Static export of the frontend into `./out` for the Tauri desktop/mobile bundle. See [docs/desktop.md](docs/desktop.md). |
+| `npm run tauri:restore` | Repair the tree if a `build:tauri` run was killed mid-build. |
 | `npm start` | Run the production build. |
 | `npm test` | Scoring engine tests via `node:test` + `tsx`. |
 | `npm run typecheck` | `tsc --noEmit` across the project. |
 | `npm run lint` | `next lint` (ESLint 8). |
 | `npm run format` | Prettier write across `src/`. |
 | `npm run verify` | Typecheck + lint + tests in one shot. |
-| `npm run e2e` | Playwright E2E suite (auto-spins a `next start` server). |
+| `npm run e2e` | Playwright E2E suite (auto-spins a `next start` server). With `E2E_TARGET=export` it runs against the Tauri bundle instead. |
 | `npm run e2e:install` | One-time browser binary install. |
 | `npm run e2e:ui` | Open the Playwright UI runner. |
 | `npm run e2e:report` | Open the last HTML report. |
@@ -92,16 +94,25 @@ The Playwright suite under `e2e/` covers the critical paths:
   blended score, persisted across reload.
 - Task-detail write-through persistence (edits survive an immediate
   reload) and the Settings blank-workspace / reset-to-demo lifecycle.
+- Record pages under the Tauri static export (`e2e/tauri-export.spec.ts`,
+  export mode only) — proves a post, task, project, or playbook renders
+  instead of the dashboard under Tauri's asset fallback — and the 308
+  redirects from legacy path URLs (`e2e/legacy-urls.spec.ts`, web only).
 
 Each spec resets `localStorage` in `beforeEach` so the seed workspace is
 always the starting state. The default config runs against a production
 build (`next start`); set `E2E_BASE_URL` to point at any other URL to run
-against an existing dev server or preview deployment.
+against an existing dev server or preview deployment, or `E2E_TARGET=export`
+to run against the Tauri static bundle in `./out` (served through a copy of
+Tauri's own asset-resolver fallback chain). CI runs the suite both ways.
 
 ```bash
 npm run e2e:install   # first time only
 npm run build         # produce the build the suite runs against
 npm run e2e
+
+npm run build:tauri              # …or the Tauri bundle
+E2E_TARGET=export npm run e2e
 ```
 
 ## Deploying
@@ -182,6 +193,7 @@ persistence doesn't apply there — the web app runs localStorage-first.
 | Domain types | `src/lib/types.ts` |
 | Persistent store | `src/lib/store.ts` (zustand + localStorage) |
 | Seed data | `src/lib/seed.ts` (deterministic, SSR-safe) |
+| Routes | `src/lib/routes.ts` — every in-app URL is built here |
 | Scoring engine | `src/lib/virality.ts` |
 | Playbooks | `src/lib/playbooks.ts` |
 | Theme | `src/lib/store.ts` (`Theme` type) + `src/app/globals.css` |
@@ -200,15 +212,27 @@ src/app/
 ├── sitemap.ts, robots.ts, manifest.ts
 ├── page.tsx                # dashboard
 ├── inbox/, my-issues/      # personal queues
-├── projects/               # list, detail (kanban/list), new
-│   └── [projectId]/tasks/[taskId]/
+├── projects/               # list, new
+│   └── view/               # project detail (kanban/list): /projects/view?id=…
+├── tasks/view/             # task detail: /tasks/view?id=…
 ├── posts/                  # composer + virality predictor
-│   ├── new/, [postId]/
+│   ├── new/, lab/
+│   ├── view/               # post detail: /posts/view?id=…
 │   ├── compare/            # up to 4 lanes via ?ids=…
 │   └── insights/           # cross-post benchmark
-├── playbooks/              # library + detail
+├── playbooks/              # library
+│   └── view/               # playbook detail: /playbooks/view?id=…
 ├── team/, labels/, settings/
 ```
+
+Record detail pages take their id from the query string, not a path segment.
+That is what lets the very same pages ship as a static export inside the
+Tauri desktop and mobile apps: Tauri's asset resolver falls back to the root
+`index.html` for any path it doesn't have, so a `/posts/<id>` URL would render
+the dashboard, whereas `/posts/view` is always a real file. Build every URL
+through `routes.*` in `src/lib/routes.ts` — never hand-write one — and read
+the id with `useIdParam()` inside a `<Suspense>` boundary. The web build
+serves 308 redirects from the old path shapes.
 
 ### Hydration
 

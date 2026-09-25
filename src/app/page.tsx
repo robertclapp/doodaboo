@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { ArrowRight, Crosshair, Plus, Sparkles, X } from "lucide-react";
 import { PlatformIcon } from "@/components/posts/PlatformIcon";
 import { describeBand, scoreIntrinsic, scoreLive } from "@/lib/virality";
+import { routes } from "@/lib/routes";
 
 export default function HomePage() {
   const projects = useStore((s) => s.projects);
@@ -88,7 +89,7 @@ export default function HomePage() {
               <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-widest text-ink/60">
                 {proj && (
                   <Link
-                    href={`/projects/${proj.id}`}
+                    href={routes.project(proj.id)}
                     className="inline-flex items-center gap-1 hover:text-ink"
                   >
                     <span
@@ -108,7 +109,7 @@ export default function HomePage() {
                 )}
               </div>
               <div className="flex items-center gap-2 pt-2">
-                <Link href={`/projects/${focused.projectId}/tasks/${focused.id}`}>
+                <Link href={routes.task(focused.id)}>
                   <Button variant="accent" iconRight={<ArrowRight size={12} />}>
                     Open task
                   </Button>
@@ -174,7 +175,7 @@ export default function HomePage() {
                     {proj?.key}-{t.number}
                   </span>
                   <Link
-                    href={`/projects/${t.projectId}/tasks/${t.id}`}
+                    href={routes.task(t.id)}
                     className="truncate text-sm hover:underline"
                   >
                     {t.title || "Untitled task"}
@@ -253,7 +254,7 @@ export default function HomePage() {
                   </span>
                   <StatusIcon status={t.status} />
                   <Link
-                    href={`/projects/${t.projectId}/tasks/${t.id}`}
+                    href={routes.task(t.id)}
                     className="truncate text-sm hover:underline"
                   >
                     {t.title || "Untitled task"}
@@ -301,7 +302,7 @@ export default function HomePage() {
                   className="px-3 py-3 border-b-[1.5px] border-ink/10 last:border-b-0"
                 >
                   <Link
-                    href={`/projects/${p.id}`}
+                    href={routes.project(p.id)}
                     className="flex items-center gap-2"
                   >
                     <span
@@ -367,7 +368,7 @@ export default function HomePage() {
                     {score.value.toFixed(0)}
                   </span>
                   <Link
-                    href={`/posts/${p.id}`}
+                    href={routes.post(p.id)}
                     className="truncate text-sm hover:underline"
                   >
                     {p.title || "Untitled post"}
@@ -411,7 +412,7 @@ export default function HomePage() {
                   </span>
                   <StatusIcon status={t.status} />
                   <Link
-                    href={`/projects/${t.projectId}/tasks/${t.id}`}
+                    href={routes.task(t.id)}
                     className="truncate text-sm hover:underline"
                   >
                     {t.title || "Untitled task"}

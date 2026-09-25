@@ -9,6 +9,7 @@ import { useStore } from "@/lib/store";
 import { useHydrated } from "@/lib/hooks";
 import { Platform, PLATFORMS } from "@/lib/types";
 import { PLAYBOOKS } from "@/lib/playbooks";
+import { routes } from "@/lib/routes";
 
 const CATEGORIES = ["all", "hook", "thread", "carousel", "longform", "trend", "engagement"] as const;
 
@@ -81,7 +82,7 @@ export default function PlaybooksPage() {
           return (
             <Link
               key={p.id}
-              href={`/playbooks/${p.id}`}
+              href={routes.playbook(p.id)}
               className="border-[1.5px] border-ink bg-paper hover:-translate-y-[2px] hover:shadow-brutal transition-all flex flex-col"
             >
               <div className="border-b-[1.5px] border-ink px-3 h-9 flex items-center justify-between">

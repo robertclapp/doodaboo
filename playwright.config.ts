@@ -3,6 +3,8 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = process.env.E2E_PORT ?? "3100";
 const BASE_URL = process.env.E2E_BASE_URL ?? `http://localhost:${PORT}`;
 const isCI = !!process.env.CI;
+/** E2E_TARGET=export runs the suite against the Tauri static bundle in ./out. */
+const isExport = process.env.E2E_TARGET === "export";
 
 /**
  * Playwright config — run against a production build of the app so we
@@ -47,14 +49,26 @@ export default defineConfig({
 
   webServer: process.env.E2E_BASE_URL
     ? undefined
-    : {
-        command: `npx next start --port ${PORT}`,
-        port: Number(PORT),
-        reuseExistingServer: !isCI,
-        timeout: 120_000,
-        env: {
-          NODE_ENV: "production",
-          NEXT_TELEMETRY_DISABLED: "1",
+    : isExport
+      ? {
+          // The Tauri static export, served through a faithful copy of
+          // Tauri's asset-resolver fallback chain (scripts/serve-export.mjs).
+          // Running the same suite here and against `next start` is what
+          // proves the web and desktop/mobile builds do not diverge. Requires
+          // `npm run build:tauri` first.
+          command: `node scripts/serve-export.mjs --port ${PORT}`,
+          port: Number(PORT),
+          reuseExistingServer: !isCI,
+          timeout: 30_000,
+        }
+      : {
+          command: `npx next start --port ${PORT}`,
+          port: Number(PORT),
+          reuseExistingServer: !isCI,
+          timeout: 120_000,
+          env: {
+            NODE_ENV: "production",
+            NEXT_TELEMETRY_DISABLED: "1",
+          },
         },
-      },
 });

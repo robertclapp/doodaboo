@@ -9,6 +9,7 @@ import { AvatarStack } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { Plus } from "lucide-react";
 import { formatDateShort } from "@/lib/utils";
+import { routes } from "@/lib/routes";
 
 export default function ProjectsPage() {
   const projects = useStore((s) => s.projects);
@@ -43,7 +44,7 @@ export default function ProjectsPage() {
           return (
             <Link
               key={p.id}
-              href={`/projects/${p.id}`}
+              href={routes.project(p.id)}
               className="border-[1.5px] border-ink bg-paper hover:-translate-y-[2px] hover:shadow-brutal transition-all"
             >
               <div className="p-4 border-b-[1.5px] border-ink flex items-start gap-3">

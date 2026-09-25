@@ -53,7 +53,7 @@ test.describe("Posts + virality predictor", () => {
     await expect(firstUseBtn).toBeVisible();
     await firstUseBtn.click();
 
-    await expect(page).toHaveURL(/\/posts\/po_/);
+    await expect(page).toHaveURL(/\/posts\/view\?id=po_/);
     // Either the live blended gauge or the intrinsic gauge will be present.
     await expect(page.getByTestId("score-value").first()).toBeVisible();
   });

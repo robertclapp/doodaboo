@@ -13,6 +13,7 @@ import { Priority, Status } from "@/lib/types";
 import { localDateInputToIso, slug } from "@/lib/utils";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { routes } from "@/lib/routes";
 
 const ACCENTS = [
   "#ff5c1a",
@@ -66,7 +67,7 @@ export default function NewProjectPage() {
       accent,
       icon: name.trim().charAt(0).toUpperCase() || "P",
     });
-    router.push(`/projects/${proj.id}`);
+    router.push(routes.project(proj.id));
   };
 
   return (

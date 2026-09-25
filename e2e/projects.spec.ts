@@ -16,7 +16,7 @@ test.describe("Projects + tasks", () => {
     ).toBeVisible();
     await page.getByRole("button", { name: /Create Project/i }).click();
     // Project detail should render with the project name in the header.
-    await expect(page).toHaveURL(/\/projects\/p_/);
+    await expect(page).toHaveURL(/\/projects\/view\?id=p_/);
     await expect(
       page.getByRole("main").getByText("E2E Project").first(),
     ).toBeVisible();
@@ -31,7 +31,7 @@ test.describe("Projects + tasks", () => {
       .getByRole("link", { name: /Marketing Website/i })
       .first()
       .click();
-    await expect(page).toHaveURL(/\/projects\/p_web/);
+    await expect(page).toHaveURL(/\/projects\/view\?id=p_web/);
 
     await page.locator("body").press("c");
     const titleInput = page.getByPlaceholder(/Describe the work in one line/i);
@@ -57,7 +57,7 @@ test.describe("Projects + tasks", () => {
       .getByRole("main")
       .getByText("Redesign pricing page hero")
       .click();
-    await expect(page).toHaveURL(/\/tasks\/t_/);
+    await expect(page).toHaveURL(/\/tasks\/view\?id=t_/);
 
     // Textboxes on the task page, in order: title input, description
     // textarea, new-comment textarea.

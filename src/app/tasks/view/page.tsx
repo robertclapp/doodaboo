@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { useIdParam } from "@/lib/route-hooks";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Textarea, Input, Label } from "@/components/ui/Input";
@@ -22,16 +23,28 @@ import {
 } from "@/lib/utils";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { useConfirm, useToast } from "@/components/ToastProvider";
+import { routes } from "@/lib/routes";
 
-export default function TaskDetailPage() {
-  const { projectId, taskId } = useParams<{
-    projectId: string;
-    taskId: string;
-  }>();
+export default function TaskViewPage() {
+  // useIdParam reads the query string; Next 15 requires a Suspense boundary
+  // around any page that does. See src/lib/routes.ts.
+  return (
+    <Suspense fallback={null}>
+      <TaskDetailPage />
+    </Suspense>
+  );
+}
+
+function TaskDetailPage() {
+  const taskId = useIdParam();
   const router = useRouter();
 
-  const project = useStore((s) => s.projects.find((p) => p.id === projectId));
+  // The URL carries only the task id; its project is derived from the task
+  // itself, so the two can never disagree.
   const task = useStore((s) => s.tasks.find((t) => t.id === taskId));
+  const project = useStore((s) =>
+    s.projects.find((p) => p.id === task?.projectId),
+  );
   const users = useStore((s) => s.users);
   const labels = useStore((s) => s.labels);
   const updateTask = useStore((s) => s.updateTask);
@@ -65,11 +78,7 @@ export default function TaskDetailPage() {
   }, [savedAt]);
 
   if (!hydrated) return null;
-  // Guard: the taskId path segment must belong to the project in the URL.
-  // Otherwise a link like /projects/<A>/tasks/<task-from-B> would render B's
-  // data under A's header/back-link, producing a misleading view and letting
-  // edits leak across projects.
-  if (!task || !project || task.projectId !== project.id) {
+  if (!task || !project) {
     return (
       <div className="p-8 font-mono uppercase text-sm">
         Not found.{" "}
@@ -88,7 +97,7 @@ export default function TaskDetailPage() {
       <PageHeader
         kicker={
           <Link
-            href={`/projects/${project.id}`}
+            href={routes.project(project.id)}
             className="flex items-center gap-1 hover:text-ink"
           >
             <ArrowLeft size={11} />
@@ -130,7 +139,7 @@ export default function TaskDetailPage() {
                       onClick: () => restoreTask(snapshot),
                     },
                   });
-                  router.push(`/projects/${project.id}`);
+                  router.push(routes.project(project.id));
                 }
               }}
             >

@@ -10,6 +10,19 @@
  */
 const isStaticExport = process.env.DOODABOO_STATIC_EXPORT === "1";
 
+/**
+ * Id shapes, duplicated from src/lib/routes.ts ID_PATTERNS because this file
+ * cannot import TypeScript. src/lib/routes.test.ts pins the same strings, and
+ * e2e/legacy-urls.spec.ts proves the redirects end to end, so a drift here
+ * fails a test rather than production.
+ */
+const ID = {
+  post: "po_[A-Za-z0-9_-]+",
+  project: "p_[A-Za-z0-9_-]+",
+  task: "t_[A-Za-z0-9_-]+",
+  playbook: "pb_[A-Za-z0-9_-]+",
+};
+
 const nextConfig = {
   reactStrictMode: true,
 
@@ -47,6 +60,39 @@ const nextConfig = {
               headers: [
                 { key: "Cache-Control", value: "public, max-age=86400" },
               ],
+            },
+          ];
+        },
+
+        // Record detail pages moved from path ids (/posts/<id>) to a static
+        // path plus id query (/posts/view?id=<id>) so the same URLs work in
+        // the Tauri static export — see src/lib/routes.ts. Old bookmarks and
+        // external links keep working on the web via 308. The regex-
+        // constrained params are the guard: /posts/new, /posts/lab and
+        // /posts/view do not start with `po_`, so they are never caught.
+        // Next ignores redirects() under output:'export', and inside Tauri
+        // nothing ever emits an old-style URL, so this is web-only by nature.
+        async redirects() {
+          return [
+            {
+              source: `/projects/:pid(${ID.project})/tasks/:tid(${ID.task})`,
+              destination: "/tasks/view?id=:tid",
+              permanent: true,
+            },
+            {
+              source: `/projects/:id(${ID.project})`,
+              destination: "/projects/view?id=:id",
+              permanent: true,
+            },
+            {
+              source: `/posts/:id(${ID.post})`,
+              destination: "/posts/view?id=:id",
+              permanent: true,
+            },
+            {
+              source: `/playbooks/:id(${ID.playbook})`,
+              destination: "/playbooks/view?id=:id",
+              permanent: true,
             },
           ];
         },

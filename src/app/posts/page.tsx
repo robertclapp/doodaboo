@@ -21,6 +21,7 @@ import { useHydrated } from "@/lib/hooks";
 import { Platform, PLATFORMS, Post, PostStatus } from "@/lib/types";
 import { describeBand, scoreIntrinsic, scoreLive } from "@/lib/virality";
 import { timeAgo } from "@/lib/utils";
+import { routes } from "@/lib/routes";
 
 const STATUS_LABEL: Record<PostStatus, string> = {
   draft: "Draft",
@@ -214,7 +215,7 @@ function PostRow({
   const tone = describeBand(score.band).tone;
   return (
     <Link
-      href={`/posts/${post.id}`}
+      href={routes.post(post.id)}
       className="grid grid-cols-[auto_auto_1fr_auto_auto_auto] items-center gap-3 px-4 h-14 border-b-[1.5px] border-ink/10 hover:bg-ink/[0.03] transition-colors"
     >
       <PlatformIcon platform={post.platform} size={28} />

@@ -12,6 +12,7 @@ import { useStore } from "@/lib/store";
 import { useHydrated } from "@/lib/hooks";
 import { Post, ScoreFactor } from "@/lib/types";
 import { describeBand, recommend, scoreIntrinsic, scoreLive } from "@/lib/virality";
+import { routes } from "@/lib/routes";
 
 const MAX_LANES = 4;
 
@@ -138,7 +139,7 @@ function ComparePageInner() {
                   <div className="h-9 border-b-[1.5px] border-ink px-3 flex items-center gap-2">
                     <PlatformIcon platform={lane.post.platform} size={18} />
                     <Link
-                      href={`/posts/${lane.post.id}`}
+                      href={routes.post(lane.post.id)}
                       className="font-mono text-[11px] uppercase tracking-widest font-bold truncate hover:underline"
                     >
                       {lane.post.title || "Untitled"}
