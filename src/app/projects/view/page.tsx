@@ -24,13 +24,24 @@ export default function ProjectViewPage() {
   // around any page that does. See src/lib/routes.ts.
   return (
     <Suspense fallback={null}>
-      <ProjectDetailPage />
+      <KeyedProjectDetailPage />
     </Suspense>
   );
 }
 
-function ProjectDetailPage() {
-  const projectId = useIdParam();
+/**
+ * Same pathname, different `?id=`: the App Router keeps one component
+ * instance across those navigations (search params are not part of a
+ * segment's state key), so per-record state — filters, drafts, the
+ * save-flash ref — would carry over from the previous record. Keying on
+ * the id remounts the page, exactly as a path segment used to.
+ */
+function KeyedProjectDetailPage() {
+  const id = useIdParam();
+  return <ProjectDetailPage key={id} id={id} />;
+}
+
+function ProjectDetailPage({ id: projectId }: { id: string }) {
   const router = useRouter();
   const project = useStore((s) => s.projects.find((p) => p.id === projectId));
   const tasks = useStore((s) =>

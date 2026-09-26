@@ -30,6 +30,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -68,14 +69,26 @@ function restore() {
     const home = path.join(root, rel);
     if (!existsSync(parked)) continue;
     if (existsSync(home)) {
-      // Both exist: the build must have re-created something at the
-      // original path. Prefer the parked original — it is the source.
-      rmSync(home, { recursive: true, force: true });
+      // Both exist: something was written at the original path while it
+      // was parked (a `git restore` after a hard-killed build, an editor
+      // save, a build re-creating it). The parked copy is the pre-build
+      // source, but the other may hold newer work — never delete it. Move
+      // it aside and say so loudly; the developer reconciles.
+      const aside = path.join(STASH, "conflicts", `${stashKey(rel)}-${process.pid}-${Date.now()}`);
+      mkdirSync(path.dirname(aside), { recursive: true });
+      renameSync(home, aside);
+      process.stderr.write(
+        `[build:tauri] WARNING: ${rel} existed both in the tree and in the stash; the tree copy was moved to ${path.relative(root, aside)} — reconcile it, then delete it\n`,
+      );
     }
     renameSync(parked, home);
     restored++;
   }
-  if (readdirSync(STASH).length === 0) rmSync(STASH, { recursive: true, force: true });
+  const leftovers = readdirSync(STASH);
+  if (leftovers.length === 0) rmSync(STASH, { recursive: true, force: true });
+  else if (leftovers.includes("conflicts")) {
+    process.stderr.write(`[build:tauri] ${path.relative(root, STASH)}/conflicts holds files moved aside; delete it once reconciled\n`);
+  }
   return restored;
 }
 
@@ -122,7 +135,12 @@ const parked = park();
 log(`parked ${parked} server-only path(s); running next build in export mode`);
 
 rmSync(path.join(root, "out"), { recursive: true, force: true });
-const result = spawnSync("npx", ["next", "build"], {
+// Run Next's own bin under the current node rather than through `npx`:
+// `tauri build` invokes this script on Windows too, where `npx` is a .cmd
+// shim that spawnSync cannot start without a shell (and Node ≥ 20.12 refuses
+// .cmd without one). The same pattern as bin/doodaboo.js.
+const nextBin = createRequire(import.meta.url).resolve("next/dist/bin/next");
+const result = spawnSync(process.execPath, [nextBin, "build"], {
   cwd: root,
   stdio: "inherit",
   env: {
@@ -133,7 +151,8 @@ const result = spawnSync("npx", ["next", "build"], {
 });
 restoreOnce();
 
-if (result.status !== 0) fail(`next build exited with ${result.status ?? "signal"}`);
+if (result.error) fail(`could not start next build: ${result.error.message}`);
+if (result.status !== 0) fail(`next build exited with ${result.status ?? `signal ${result.signal}`}`);
 validateOut();
 log("static bundle ready in ./out");
 
@@ -164,7 +183,8 @@ function validateOut() {
   const leaked = [];
   const walk = (dir) => {
     for (const name of readdirSync(dir, { withFileTypes: true })) {
-      const rel = path.relative(out, path.join(dir, name.name));
+      // Normalize to "/" so the patterns below hold on Windows too.
+      const rel = path.relative(out, path.join(dir, name.name)).split(path.sep).join("/");
       if (/\[[^\]]+\]/.test(rel) || /(^|\/)_\.html$/.test(rel) || /^api(\/|$)/.test(rel)) leaked.push(rel);
       if (name.isDirectory()) walk(path.join(dir, name.name));
     }

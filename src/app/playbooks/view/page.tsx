@@ -17,14 +17,25 @@ export default function PlaybookViewPage() {
   // around any page that does. See src/lib/routes.ts.
   return (
     <Suspense fallback={null}>
-      <PlaybookDetailPage />
+      <KeyedPlaybookDetailPage />
     </Suspense>
   );
 }
 
-function PlaybookDetailPage() {
+/**
+ * Same pathname, different `?id=`: the App Router keeps one component
+ * instance across those navigations (search params are not part of a
+ * segment's state key), so per-record state — filters, drafts, the
+ * save-flash ref — would carry over from the previous record. Keying on
+ * the id remounts the page, exactly as a path segment used to.
+ */
+function KeyedPlaybookDetailPage() {
+  const id = useIdParam();
+  return <PlaybookDetailPage key={id} id={id} />;
+}
+
+function PlaybookDetailPage({ id: playbookId }: { id: string }) {
   const hydrated = useHydrated();
-  const playbookId = useIdParam();
   const playbook = getPlaybook(playbookId);
   const posts = useStore((s) => s.posts);
 

@@ -69,7 +69,7 @@ npm run dev
 | `npm run build:tauri` | Static export of the frontend into `./out` for the Tauri desktop/mobile bundle. See [docs/desktop.md](docs/desktop.md). |
 | `npm run tauri:restore` | Repair the tree if a `build:tauri` run was killed mid-build. |
 | `npm start` | Run the production build. |
-| `npm test` | Scoring engine tests via `node:test` + `tsx`. |
+| `npm test` | Unit tests via `node:test` + `tsx`: scoring engine, routes, vault, API, CLI helpers. |
 | `npm run typecheck` | `tsc --noEmit` across the project. |
 | `npm run lint` | `next lint` (ESLint 8). |
 | `npm run format` | Prettier write across `src/`. |
@@ -193,7 +193,7 @@ persistence doesn't apply there — the web app runs localStorage-first.
 | Domain types | `src/lib/types.ts` |
 | Persistent store | `src/lib/store.ts` (zustand + localStorage) |
 | Seed data | `src/lib/seed.ts` (deterministic, SSR-safe) |
-| Routes | `src/lib/routes.ts` — every in-app URL is built here |
+| Routes | `src/lib/routes.ts` — every record-detail URL is built here |
 | Scoring engine | `src/lib/virality.ts` |
 | Playbooks | `src/lib/playbooks.ts` |
 | Theme | `src/lib/store.ts` (`Theme` type) + `src/app/globals.css` |
@@ -210,6 +210,7 @@ src/app/
 ├── opengraph-image.tsx     # 1200×630 OG image (edge runtime)
 ├── icon.tsx, apple-icon.tsx
 ├── sitemap.ts, robots.ts, manifest.ts
+├── api/                    # HTTP API route handlers (web only; parked out of the Tauri export)
 ├── page.tsx                # dashboard
 ├── inbox/, my-issues/      # personal queues
 ├── projects/               # list, new
@@ -229,10 +230,12 @@ Record detail pages take their id from the query string, not a path segment.
 That is what lets the very same pages ship as a static export inside the
 Tauri desktop and mobile apps: Tauri's asset resolver falls back to the root
 `index.html` for any path it doesn't have, so a `/posts/<id>` URL would render
-the dashboard, whereas `/posts/view` is always a real file. Build every URL
-through `routes.*` in `src/lib/routes.ts` — never hand-write one — and read
-the id with `useIdParam()` inside a `<Suspense>` boundary. The web build
-serves 308 redirects from the old path shapes.
+the dashboard, whereas `/posts/view` is always a real file. Build every
+record URL through `routes.*` in `src/lib/routes.ts` — never hand-write one —
+and read the id with `useIdParam()` inside a `<Suspense>` boundary, keying the
+detail component on that id so moving between two records remounts it (same
+pathname, different query, so the router would otherwise keep the previous
+record's state). The web build serves 308 redirects from the old path shapes.
 
 ### Hydration
 

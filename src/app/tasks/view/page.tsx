@@ -30,13 +30,24 @@ export default function TaskViewPage() {
   // around any page that does. See src/lib/routes.ts.
   return (
     <Suspense fallback={null}>
-      <TaskDetailPage />
+      <KeyedTaskDetailPage />
     </Suspense>
   );
 }
 
-function TaskDetailPage() {
-  const taskId = useIdParam();
+/**
+ * Same pathname, different `?id=`: the App Router keeps one component
+ * instance across those navigations (search params are not part of a
+ * segment's state key), so per-record state — filters, drafts, the
+ * save-flash ref — would carry over from the previous record. Keying on
+ * the id remounts the page, exactly as a path segment used to.
+ */
+function KeyedTaskDetailPage() {
+  const id = useIdParam();
+  return <TaskDetailPage key={id} id={id} />;
+}
+
+function TaskDetailPage({ id: taskId }: { id: string }) {
   const router = useRouter();
 
   // The URL carries only the task id; its project is derived from the task

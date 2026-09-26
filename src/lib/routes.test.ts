@@ -60,3 +60,23 @@ describe("ID_PATTERNS — what the legacy web redirects may match", () => {
     assert.doesNotMatch("t_x", re(ID_PATTERNS.project));
   });
 });
+
+describe("routes — next.config.mjs redirects stay in step with ID_PATTERNS", () => {
+  it("each legacy-path redirect embeds the exact pattern for its record type", async () => {
+    // next.config.mjs cannot import TypeScript, so it carries a hand copy of
+    // ID_PATTERNS. This pins the copy: a narrowing or typo there fails here
+    // rather than sending a real id to the 404 page.
+    const cfg = (await import("../../next.config.mjs")).default as {
+      redirects?: () => Promise<{ source: string; destination: string }[]>;
+    };
+    assert.ok(cfg.redirects, "web config declares redirects()");
+    const sources = (await cfg.redirects()).map((r) => r.source);
+    assert.equal(sources.length, 4);
+    for (const [kind, pattern] of Object.entries(ID_PATTERNS)) {
+      assert.ok(
+        sources.some((s) => s.includes(`(${pattern})`)),
+        `${kind} pattern "${pattern}" is missing from next.config.mjs redirects: ${sources.join(" | ")}`,
+      );
+    }
+  });
+});

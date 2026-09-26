@@ -1,5 +1,7 @@
 /**
- * Every in-app URL is built here, and nowhere else.
+ * Every record-detail URL (post, project, task, playbook) is built here, and
+ * nowhere else; static page paths are also listed so call sites can share
+ * them.
  *
  * Records that exist only at runtime — posts, projects, tasks — are
  * addressed by query string (`/posts/view?id=…`) rather than by path segment

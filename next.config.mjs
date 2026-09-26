@@ -12,7 +12,8 @@ const isStaticExport = process.env.DOODABOO_STATIC_EXPORT === "1";
 
 /**
  * Id shapes, duplicated from src/lib/routes.ts ID_PATTERNS because this file
- * cannot import TypeScript. src/lib/routes.test.ts pins the same strings, and
+ * cannot import TypeScript. src/lib/routes.test.ts imports this config and
+ * asserts each redirect embeds the matching ID_PATTERNS entry, and
  * e2e/legacy-urls.spec.ts proves the redirects end to end, so a drift here
  * fails a test rather than production.
  */
@@ -29,6 +30,12 @@ const nextConfig = {
   ...(isStaticExport
     ? {
         output: "export",
+        // No custom distDir: Next only writes the export to ./out (what
+        // tauri.conf.json's frontendDist points at) when distDir is the
+        // default; a custom one becomes the export directory itself. The
+        // cost is that build:tauri overwrites the web build's .next, so run
+        // `npm run build` again before `npm start` (documented in
+        // docs/desktop.md).
         // The default image loader needs a server; the app uses no
         // next/image today, but the export refuses to build without this.
         images: { unoptimized: true },

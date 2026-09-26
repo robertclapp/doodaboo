@@ -2,6 +2,8 @@
 name = "doodaboo"
 version = "0.1.0"
 edition = "2021"
+# Floor set by the locked dependency graph (darling 0.24, icu 2.x).
+rust-version = "1.88"
 description = "Brutalist project OS, desktop edition"
 authors = ["Robert Clapp"]
 

@@ -39,13 +39,24 @@ export default function PostViewPage() {
   // in the query rather than the path.
   return (
     <Suspense fallback={null}>
-      <PostDetailPage />
+      <KeyedPostDetailPage />
     </Suspense>
   );
 }
 
-function PostDetailPage() {
-  const postId = useIdParam();
+/**
+ * Same pathname, different `?id=`: the App Router keeps one component
+ * instance across those navigations (search params are not part of a
+ * segment's state key), so per-record state — filters, drafts, the
+ * save-flash ref — would carry over from the previous record. Keying on
+ * the id remounts the page, exactly as a path segment used to.
+ */
+function KeyedPostDetailPage() {
+  const id = useIdParam();
+  return <PostDetailPage key={id} id={id} />;
+}
+
+function PostDetailPage({ id: postId }: { id: string }) {
   const router = useRouter();
   const post = useStore((s) => s.posts.find((p) => p.id === postId));
   const updatePost = useStore((s) => s.updatePost);

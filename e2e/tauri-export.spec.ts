@@ -60,6 +60,11 @@ test.describe("Tauri static export — record pages resolve under the asset fall
     await page.goto(routes.project("p_web"));
     await expect(page.getByRole("main").getByText("Marketing Website").first()).toBeVisible();
     await expect(page.getByRole("main").getByText("Redesign pricing page hero")).toBeVisible();
+    // The dashboard also lists project names and recent tasks, so rule it
+    // out explicitly: no "My Day" panel, and the project page's own view
+    // toggle is present.
+    await expect(page.getByRole("main").getByText(/My Day/)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Board$/i })).toBeVisible();
   });
 
   test("a hard load of a playbook URL renders the playbook", async ({ page }) => {
@@ -76,7 +81,9 @@ test.describe("Tauri static export — record pages resolve under the asset fall
   test("the sidebar highlights the project of the current task", async ({ page }) => {
     await page.goto(routes.task("t_p_web_1"));
     const nav = page.getByRole("complementary", { name: /Primary navigation/i });
-    const active = nav.getByRole("link", { name: /Marketing Website/i });
-    await expect(active).toHaveClass(/bg-ink/);
+    // Whole-token match: the inactive class string contains `hover:bg-ink/5`.
+    const highlighted = /(^|\s)bg-ink(\s|$)/;
+    await expect(nav.getByRole("link", { name: /Marketing Website/i })).toHaveClass(highlighted);
+    await expect(nav.getByRole("link", { name: /Core Application/i })).not.toHaveClass(highlighted);
   });
 });

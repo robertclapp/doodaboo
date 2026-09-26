@@ -35,10 +35,12 @@ function ProjectNavLinks({
   projects,
   activeProjectId,
   itemClass,
+  onNavigate,
 }: {
   projects: Project[];
   activeProjectId: string | undefined;
   itemClass: (active: boolean) => string;
+  onNavigate: () => void;
 }) {
   return (
     <>
@@ -47,6 +49,10 @@ function ProjectNavLinks({
           key={p.id}
           href={routes.project(p.id)}
           className={itemClass(p.id === activeProjectId)}
+          // Project pages share one pathname and differ only by ?id=, so the
+          // pathname-based drawer close below never fires for project →
+          // project; close explicitly on the click instead.
+          onClick={onNavigate}
         >
           <span
             className="w-4 h-4 flex items-center justify-center border-[1.5px] border-ink font-mono text-[9px] font-bold shrink-0"
@@ -76,11 +82,13 @@ function ActiveProjectNavLinks({
   tasks,
   pathname,
   itemClass,
+  onNavigate,
 }: {
   projects: Project[];
   tasks: Task[];
   pathname: string;
   itemClass: (active: boolean) => string;
+  onNavigate: () => void;
 }) {
   const id = useIdParam();
   const activeProjectId =
@@ -94,6 +102,7 @@ function ActiveProjectNavLinks({
       projects={projects}
       activeProjectId={activeProjectId}
       itemClass={itemClass}
+      onNavigate={onNavigate}
     />
   );
 }
@@ -288,6 +297,7 @@ export function Sidebar({
               projects={projects}
               activeProjectId={undefined}
               itemClass={item}
+              onNavigate={onMobileClose}
             />
           }
         >
@@ -296,6 +306,7 @@ export function Sidebar({
             tasks={tasks}
             pathname={pathname}
             itemClass={item}
+            onNavigate={onMobileClose}
           />
         </Suspense>
 

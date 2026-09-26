@@ -3,19 +3,20 @@
  * Serve ./out the way Tauri's webview will.
  *
  * Tauri does not run a web server; it embeds frontendDist and resolves each
- * request through its asset resolver (tauri/src/manager/mod.rs), which tries
- * in order:
+ * request through its asset resolver (tauri/src/manager/mod.rs), which:
  *
- *   <path>  ->  <path>.html  ->  <path>/index.html  ->  index.html
+ *   1. strips the query string and fragment,
+ *   2. pops one trailing "/" and strips one leading "/",
+ *   3. percent-decodes lossily (a malformed sequence never fails),
+ *   4. tries  <path>  ->  <path>.html  ->  <path>/index.html  ->  index.html
  *
- * and strips any query string or fragment before looking anything up. It
- * never returns 404 — a missing chunk, RSC payload, or page comes back as the
- * root index.html with status 200 and text/html. That last fallback is what
- * makes a bad route render the dashboard at the wrong URL instead of failing,
- * so an E2E run against this server catches exactly the class of bug
- * `next dev` (which has a real router) cannot.
+ * It never returns 404 — a missing chunk, RSC payload, or page comes back as
+ * the root index.html with status 200 and text/html. That last fallback is
+ * what makes a bad route render the dashboard at the wrong URL instead of
+ * failing, so an E2E run against this server catches exactly the class of
+ * bug `next dev` (which has a real router) cannot.
  *
- *   node scripts/serve-export.mjs --port 3101      # playwright.config uses this
+ *   node scripts/serve-export.mjs --port 3100   # playwright.config.ts passes its E2E_PORT (default 3100)
  *   E2E_TARGET=export npm run e2e
  */
 import { createReadStream, statSync } from "node:fs";
@@ -25,7 +26,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "out");
 const portArg = process.argv.indexOf("--port");
-const port = Number(portArg > -1 ? process.argv[portArg + 1] : process.env.PORT ?? 3101);
+const port = Number(portArg > -1 ? process.argv[portArg + 1] : process.env.PORT ?? 3100);
 
 const TYPES = {
   html: "text/html; charset=utf-8",
@@ -50,9 +51,21 @@ const isFile = (p) => {
   }
 };
 
-/** Mirror tauri's get_asset: path, path.html, path/index.html, index.html. */
-function resolve(pathname) {
-  let p = decodeURIComponent(pathname).replace(/^\/+/, "");
+/** percent_decode(..).decode_utf8_lossy(): never throws, unlike decodeURIComponent. */
+function lossyDecode(s) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/** Mirror tauri's get_asset on the raw request target. */
+function resolve(rawUrl) {
+  let p = rawUrl.split(/[?#]/)[0];
+  if (p.endsWith("/")) p = p.slice(0, -1);
+  p = lossyDecode(p);
+  if (p.startsWith("/")) p = p.slice(1);
   if (p === "") p = "index.html";
   for (const candidate of [p, `${p}.html`, `${p}/index.html`, "index.html"]) {
     const abs = path.join(root, candidate);
@@ -69,20 +82,28 @@ if (!isFile(path.join(root, "index.html"))) {
   process.exit(1);
 }
 
-http
-  .createServer((req, res) => {
-    // The URL constructor drops the query and fragment for us, like Tauri.
-    const { pathname } = new URL(req.url ?? "/", "http://tauri.localhost");
-    const file = resolve(pathname);
-    if (!file) {
-      res.writeHead(500, { "content-type": "text/plain" });
-      res.end("out/ has no index.html");
-      return;
-    }
-    const ext = path.extname(file).slice(1);
-    res.writeHead(200, { "content-type": TYPES[ext] ?? "application/octet-stream" });
-    createReadStream(file).pipe(res);
-  })
-  .listen(port, "127.0.0.1", () => {
-    process.stdout.write(`[serve-export] serving ${root} at http://127.0.0.1:${port} (tauri fallback chain)\n`);
-  });
+const server = http.createServer((req, res) => {
+  const file = resolve(req.url ?? "/");
+  if (!file) {
+    res.writeHead(500, { "content-type": "text/plain" });
+    res.end("out/ has no index.html");
+    return;
+  }
+  const ext = path.extname(file).slice(1);
+  res.writeHead(200, { "content-type": TYPES[ext] ?? "application/octet-stream" });
+  createReadStream(file)
+    .on("error", (err) => {
+      process.stderr.write(`[serve-export] ${req.url}: ${err.message}\n`);
+      res.destroy();
+    })
+    .pipe(res);
+});
+
+server.on("error", (err) => {
+  process.stderr.write(`[serve-export] ${err.message}\n`);
+  process.exit(1);
+});
+
+server.listen(port, "127.0.0.1", () => {
+  process.stdout.write(`[serve-export] serving ${root} at http://127.0.0.1:${port} (tauri fallback chain)\n`);
+});

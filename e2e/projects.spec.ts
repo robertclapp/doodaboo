@@ -100,4 +100,29 @@ test.describe("Projects + tasks", () => {
       await expect(headers.filter({ hasText: label })).toBeVisible();
     }
   });
+
+  test("switching projects in the sidebar resets the previous project's filters", async ({
+    page,
+  }) => {
+    // Project pages share one pathname and differ only by ?id=. The App
+    // Router keeps a single component instance across such navigations, so
+    // without keying the page on the id, p_web's filter text would still be
+    // applied to p_app and silently empty its list.
+    await page.goto("/projects/view?id=p_web");
+    const filter = page.getByPlaceholder("Filter…");
+    await filter.fill("hero");
+    await expect(
+      page.getByRole("main").getByText("Redesign pricing page hero"),
+    ).toBeVisible();
+
+    const nav = page.getByRole("complementary", { name: /Primary navigation/i });
+    await nav.getByRole("link", { name: /Core Application/i }).click();
+    await expect(page).toHaveURL(/\/projects\/view\?id=p_app/);
+    await expect(page.getByRole("main").getByText("Core Application").first()).toBeVisible();
+
+    // Fresh page state: filter empty and the new project's tasks listed.
+    await expect(page.getByPlaceholder("Filter…")).toHaveValue("");
+    await expect(page.getByRole("main").getByText("Redesign pricing page hero")).toHaveCount(0);
+    await expect(page.getByRole("main").getByText(/APP-1\b/).first()).toBeVisible();
+  });
 });

@@ -116,7 +116,7 @@ export default function HookLabPage() {
       if (ids.length >= 4) break;
     }
     toast.success(`Spawned ${ids.length} drafts`);
-    router.push(`/posts/compare?ids=${ids.join(",")}`);
+    router.push(routes.compare(ids));
   };
 
   if (!hydrated) return null;
