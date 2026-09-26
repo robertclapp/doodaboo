@@ -12,6 +12,7 @@ import { LabelPicker } from "./pickers/LabelPicker";
 import { useStore } from "@/lib/store";
 import { Priority, Status, TaskType } from "@/lib/types";
 import { useRouter } from "next/navigation";
+import { routes } from "@/lib/routes";
 
 export function NewTaskModal({
   open,
@@ -65,7 +66,7 @@ export function NewTaskModal({
       labelIds,
     });
     onClose();
-    if (goTo) router.push(`/projects/${t.projectId}/tasks/${t.id}`);
+    if (goTo) router.push(routes.task(t.id));
   };
 
   return (

@@ -39,7 +39,7 @@ test.describe("Post composer field behavior", () => {
     await page.goto("/posts/new");
     await page.getByPlaceholder(/Working title/i).fill("Snapshot minute test");
     await page.getByRole("button", { name: /Mark live/i }).click();
-    await expect(page).toHaveURL(/\/posts\/po_/);
+    await expect(page).toHaveURL(/\/posts\/view\?id=po_/);
 
     // Fresh post: the parent suggests T+5.
     const minute = page.getByLabel(/^Minute$/);
@@ -61,7 +61,7 @@ test.describe("Post composer field behavior", () => {
     await page.goto("/posts/new");
     await page.getByPlaceholder(/Working title/i).fill("Minute preservation");
     await page.getByRole("button", { name: /Mark live/i }).click();
-    await expect(page).toHaveURL(/\/posts\/po_/);
+    await expect(page).toHaveURL(/\/posts\/view\?id=po_/);
 
     // Bank one snapshot so there is something to delete.
     await page.getByLabel(/^Views$/).fill("1000");

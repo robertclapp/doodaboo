@@ -3,23 +3,44 @@ use std::io::ErrorKind;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{AppHandle, Manager};
 
 const MAX_BACKUPS: usize = 20;
 
-/// Default vault location: $DOODABOO_VAULT or ~/.doodaboo. Surfaces an
-/// error to the caller when the home directory can't be resolved
-/// instead of silently scaffolding a vault in the current working dir
-/// (which would put user data somewhere random next to the binary).
-fn default_vault_root() -> Result<PathBuf, String> {
+/// Default vault location.
+///
+/// Desktop: `$DOODABOO_VAULT`, else `~/.doodaboo` — unchanged, so vaults
+/// created by earlier builds (and by the CLI, which shares the layout) keep
+/// loading. Surfaces an error when the home directory can't be resolved
+/// instead of silently scaffolding a vault in the current working dir.
+///
+/// Mobile: the app's sandboxed data directory. There is no meaningful home
+/// directory on Android (`dirs::home_dir()` is `None`) and iOS confines the
+/// process to its container, so the only writable, persistent, backed-up
+/// location is what the path resolver reports for this app. Nested under
+/// `vault/` so plugin state written to the same directory can't collide with
+/// `workspace.json` or the backups folder.
+fn default_vault_root(app: &AppHandle) -> Result<PathBuf, String> {
     if let Ok(env) = std::env::var("DOODABOO_VAULT") {
         return Ok(PathBuf::from(env));
     }
-    match dirs::home_dir() {
-        Some(home) => Ok(home.join(".doodaboo")),
-        None => Err(
-            "Couldn't resolve $HOME. Set DOODABOO_VAULT to an explicit path.".into(),
-        ),
+    #[cfg(mobile)]
+    {
+        return app
+            .path()
+            .app_data_dir()
+            .map(|dir| dir.join("vault"))
+            .map_err(|e| format!("Couldn't resolve the app data directory: {e}"));
+    }
+    #[cfg(not(mobile))]
+    {
+        let _ = app;
+        match dirs::home_dir() {
+            Some(home) => Ok(home.join(".doodaboo")),
+            None => Err(
+                "Couldn't resolve $HOME. Set DOODABOO_VAULT to an explicit path.".into(),
+            ),
+        }
     }
 }
 
@@ -42,16 +63,18 @@ fn vault_paths(root: PathBuf) -> VaultPaths {
     }
 }
 
+// `AppHandle` parameters are injected by Tauri, not passed from JS, so the
+// front-end's `invoke("vault_save", { state })` calls are unchanged.
 #[tauri::command]
-fn vault_root() -> Result<VaultPaths, String> {
-    Ok(vault_paths(default_vault_root()?))
+fn vault_root(app: AppHandle) -> Result<VaultPaths, String> {
+    Ok(vault_paths(default_vault_root(&app)?))
 }
 
 /// Read the vault's workspace.json. Returns null when no vault exists yet
 /// so the front-end can render an onboarding screen instead of crashing.
 #[tauri::command]
-fn vault_load() -> Result<Option<serde_json::Value>, String> {
-    let path = default_vault_root()?.join("workspace.json");
+fn vault_load(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
+    let path = default_vault_root(&app)?.join("workspace.json");
     match fs::read_to_string(&path) {
         Ok(raw) => serde_json::from_str(&raw)
             .map(Some)
@@ -65,8 +88,8 @@ fn vault_load() -> Result<Option<serde_json::Value>, String> {
 /// half-written workspace.json. Mirrors the Node-side primitive in
 /// src/lib/vault.ts.
 #[tauri::command]
-fn vault_save(state: serde_json::Value) -> Result<(), String> {
-    let root = default_vault_root()?;
+fn vault_save(app: AppHandle, state: serde_json::Value) -> Result<(), String> {
+    let root = default_vault_root(&app)?;
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     let target = root.join("workspace.json");
     let tmp = root.join(format!("workspace.json.tmp-{}", std::process::id()));
@@ -118,8 +141,8 @@ fn trim_backups(dir: &PathBuf) -> std::io::Result<()> {
 }
 
 #[tauri::command]
-fn vault_init() -> Result<VaultPaths, String> {
-    let root = default_vault_root()?;
+fn vault_init(app: AppHandle) -> Result<VaultPaths, String> {
+    let root = default_vault_root(&app)?;
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     fs::create_dir_all(root.join("backups")).map_err(|e| e.to_string())?;
     fs::create_dir_all(root.join("plugins")).map_err(|e| e.to_string())?;
@@ -176,7 +199,7 @@ pub fn run() {
             // Scaffold the vault on first launch. We surface the
             // failure mode rather than silently scaffold inside the
             // app's CWD when no home directory is available.
-            match vault_init() {
+            match vault_init(app.handle().clone()) {
                 Ok(paths) => {
                     if let Some(window) = app.get_webview_window("main") {
                         let _ = window

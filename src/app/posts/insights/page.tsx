@@ -15,6 +15,7 @@ import {
   scoreIntrinsic,
   scoreLive,
 } from "@/lib/virality";
+import { routes } from "@/lib/routes";
 
 export default function InsightsPage() {
   const hydrated = useHydrated();
@@ -374,7 +375,7 @@ function PostList({ items }: { items: ScoredPost[] }) {
             {value.toFixed(0)}
           </span>
           <Link
-            href={`/posts/${post.id}`}
+            href={routes.post(post.id)}
             className="truncate text-sm hover:underline"
           >
             {post.title || "Untitled"}

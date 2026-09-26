@@ -9,9 +9,10 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: "/",
-        // Per-record dynamic surfaces are localStorage-bound and have nothing
-        // crawlable; explicitly disallow to avoid wasted crawl budget.
-        disallow: ["/projects/*/tasks/*", "/playbooks/*"],
+        // Per-record detail views (/posts/view?id=…, /tasks/view?id=…) read
+        // localStorage-bound records and have nothing crawlable; explicitly
+        // disallow to avoid wasted crawl budget. See src/lib/routes.ts.
+        disallow: ["/posts/view", "/projects/view", "/tasks/view", "/playbooks/view"],
       },
     ],
     sitemap: `${SITE_URL}/sitemap.xml`,

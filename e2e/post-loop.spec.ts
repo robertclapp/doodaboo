@@ -34,7 +34,7 @@ test.describe("Post loop: create → score → snapshot → live score", () => {
       .toBeGreaterThan(before);
 
     await page.getByRole("button", { name: /Mark live/i }).click();
-    await expect(page).toHaveURL(/\/posts\/po_/);
+    await expect(page).toHaveURL(/\/posts\/view\?id=po_/);
 
     // Fresh post: no snapshots, so no live blended gauge yet —
     // scoreLive() returns undefined until the first snapshot lands.

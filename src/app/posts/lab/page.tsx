@@ -19,6 +19,7 @@ import {
   variantsForPlatform,
 } from "@/lib/hooks-generator";
 import { describeBand, scoreIntrinsic } from "@/lib/virality";
+import { routes } from "@/lib/routes";
 
 export default function HookLabPage() {
   const hydrated = useHydrated();
@@ -92,7 +93,7 @@ export default function HookLabPage() {
       context: makeContext(),
     });
     toast.success("Draft created");
-    router.push(`/posts/${post.id}`);
+    router.push(routes.post(post.id));
   };
 
   const spawnComparison = () => {
@@ -115,7 +116,7 @@ export default function HookLabPage() {
       if (ids.length >= 4) break;
     }
     toast.success(`Spawned ${ids.length} drafts`);
-    router.push(`/posts/compare?ids=${ids.join(",")}`);
+    router.push(routes.compare(ids));
   };
 
   if (!hydrated) return null;

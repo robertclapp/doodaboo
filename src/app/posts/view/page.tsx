@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useIdParam } from "@/lib/route-hooks";
 import { ArrowLeft, Copy, Trash2 } from "lucide-react";
 import { useConfirm, useToast } from "@/components/ToastProvider";
 import { PageHeader } from "@/components/PageHeader";
@@ -28,11 +29,34 @@ import {
   localDateInputToIso,
   timeAgo,
 } from "@/lib/utils";
+import { routes } from "@/lib/routes";
 
 const STATUSES: PostStatus[] = ["draft", "scheduled", "live", "analyzing", "archived"];
 
-export default function PostDetailPage() {
-  const { postId } = useParams<{ postId: string }>();
+export default function PostViewPage() {
+  // useIdParam reads the query string; Next 15 requires a Suspense boundary
+  // around any page that does. See src/lib/routes.ts for why the id lives
+  // in the query rather than the path.
+  return (
+    <Suspense fallback={null}>
+      <KeyedPostDetailPage />
+    </Suspense>
+  );
+}
+
+/**
+ * Same pathname, different `?id=`: the App Router keeps one component
+ * instance across those navigations (search params are not part of a
+ * segment's state key), so per-record state — filters, drafts, the
+ * save-flash ref — would carry over from the previous record. Keying on
+ * the id remounts the page, exactly as a path segment used to.
+ */
+function KeyedPostDetailPage() {
+  const id = useIdParam();
+  return <PostDetailPage key={id} id={id} />;
+}
+
+function PostDetailPage({ id: postId }: { id: string }) {
   const router = useRouter();
   const post = useStore((s) => s.posts.find((p) => p.id === postId));
   const updatePost = useStore((s) => s.updatePost);
@@ -129,7 +153,7 @@ export default function PostDetailPage() {
               iconLeft={<Copy size={12} />}
               onClick={() => {
                 const v = duplicatePost(post.id);
-                if (v) router.push(`/posts/${v.id}`);
+                if (v) router.push(routes.post(v.id));
               }}
             >
               A/B variant
@@ -277,7 +301,7 @@ export default function PostDetailPage() {
               {post.playbookId && (
                 <Meta label="Playbook">
                   <Link
-                    href={`/playbooks/${post.playbookId}`}
+                    href={routes.playbook(post.playbookId)}
                     className="hover:underline"
                   >
                     {getPlaybook(post.playbookId)?.name ?? post.playbookId}

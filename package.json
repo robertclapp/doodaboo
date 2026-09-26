@@ -8,13 +8,14 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:tauri": "node scripts/build-tauri.mjs",
     "start": "next start",
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,md,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,md,json}\"",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx src/lib/api.test.ts src/lib/api-auth.test.ts src/lib/hooks-generator.test.ts src/lib/mutations.test.ts src/lib/myDay.test.ts src/lib/playbooks.test.ts src/lib/seed.test.ts src/lib/tauri-storage.test.ts src/lib/utils.test.ts src/lib/vault.test.ts src/lib/virality.test.ts src/app/api/api.test.ts cli/util.test.ts cli/commands/dash.test.ts cli/commands/report.test.ts",
+    "test": "node --test --import tsx src/lib/api.test.ts src/lib/api-auth.test.ts src/lib/hooks-generator.test.ts src/lib/mutations.test.ts src/lib/myDay.test.ts src/lib/playbooks.test.ts src/lib/routes.test.ts src/lib/seed.test.ts src/lib/tauri-storage.test.ts src/lib/utils.test.ts src/lib/vault.test.ts src/lib/virality.test.ts src/app/api/api.test.ts cli/util.test.ts cli/commands/dash.test.ts cli/commands/report.test.ts",
     "test:cli": "node --test --import tsx cli/cli.test.ts",
     "test:all": "npm test && npm run test:cli",
     "e2e": "playwright test",
@@ -26,7 +27,8 @@
     "doodaboo": "tsx cli/index.ts",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "tauri:restore": "node scripts/build-tauri.mjs --restore-only"
   },
   "bin": {
     "doodaboo": "./bin/doodaboo.js"
@@ -43,6 +45,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
+    "@tauri-apps/cli": "~2.11.4",
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

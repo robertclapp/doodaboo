@@ -16,7 +16,7 @@ test.describe("Projects + tasks", () => {
     ).toBeVisible();
     await page.getByRole("button", { name: /Create Project/i }).click();
     // Project detail should render with the project name in the header.
-    await expect(page).toHaveURL(/\/projects\/p_/);
+    await expect(page).toHaveURL(/\/projects\/view\?id=p_/);
     await expect(
       page.getByRole("main").getByText("E2E Project").first(),
     ).toBeVisible();
@@ -31,7 +31,7 @@ test.describe("Projects + tasks", () => {
       .getByRole("link", { name: /Marketing Website/i })
       .first()
       .click();
-    await expect(page).toHaveURL(/\/projects\/p_web/);
+    await expect(page).toHaveURL(/\/projects\/view\?id=p_web/);
 
     await page.locator("body").press("c");
     const titleInput = page.getByPlaceholder(/Describe the work in one line/i);
@@ -57,7 +57,7 @@ test.describe("Projects + tasks", () => {
       .getByRole("main")
       .getByText("Redesign pricing page hero")
       .click();
-    await expect(page).toHaveURL(/\/tasks\/t_/);
+    await expect(page).toHaveURL(/\/tasks\/view\?id=t_/);
 
     // Textboxes on the task page, in order: title input, description
     // textarea, new-comment textarea.
@@ -99,5 +99,30 @@ test.describe("Projects + tasks", () => {
       // six columns, so there's no risk of one matching another's header.
       await expect(headers.filter({ hasText: label })).toBeVisible();
     }
+  });
+
+  test("switching projects in the sidebar resets the previous project's filters", async ({
+    page,
+  }) => {
+    // Project pages share one pathname and differ only by ?id=. The App
+    // Router keeps a single component instance across such navigations, so
+    // without keying the page on the id, p_web's filter text would still be
+    // applied to p_app and silently empty its list.
+    await page.goto("/projects/view?id=p_web");
+    const filter = page.getByPlaceholder("Filter…");
+    await filter.fill("hero");
+    await expect(
+      page.getByRole("main").getByText("Redesign pricing page hero"),
+    ).toBeVisible();
+
+    const nav = page.getByRole("complementary", { name: /Primary navigation/i });
+    await nav.getByRole("link", { name: /Core Application/i }).click();
+    await expect(page).toHaveURL(/\/projects\/view\?id=p_app/);
+    await expect(page.getByRole("main").getByText("Core Application").first()).toBeVisible();
+
+    // Fresh page state: filter empty and the new project's tasks listed.
+    await expect(page.getByPlaceholder("Filter…")).toHaveValue("");
+    await expect(page.getByRole("main").getByText("Redesign pricing page hero")).toHaveCount(0);
+    await expect(page.getByRole("main").getByText(/APP-1\b/).first()).toBeVisible();
   });
 });

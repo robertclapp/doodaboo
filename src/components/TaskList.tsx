@@ -12,6 +12,7 @@ import { LabelPicker } from "./pickers/LabelPicker";
 import { cn, priorityRank } from "@/lib/utils";
 import { DueBadge } from "./DueBadge";
 import { useMemo } from "react";
+import { routes } from "@/lib/routes";
 
 export function TaskList({
   tasks,
@@ -144,7 +145,7 @@ function TaskListInner({
             )}
 
             <Link
-              href={`/projects/${t.projectId}/tasks/${t.id}`}
+              href={routes.task(t.id)}
               className="truncate text-sm hover:underline"
             >
               <span
@@ -165,7 +166,7 @@ function TaskListInner({
 
             {showProject && proj && (
               <Link
-                href={`/projects/${proj.id}`}
+                href={routes.project(proj.id)}
                 className="font-mono text-[10px] uppercase tracking-wider border-[1.5px] border-ink/30 px-1 h-5 inline-flex items-center"
               >
                 {proj.key}

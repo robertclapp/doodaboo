@@ -13,6 +13,7 @@ import { useStore } from "@/lib/store";
 import { useHydrated } from "@/lib/hooks";
 import { Platform, Post, PostStatus } from "@/lib/types";
 import { recommend } from "@/lib/virality";
+import { routes } from "@/lib/routes";
 
 export default function NewPostPage() {
   const hydrated = useHydrated();
@@ -38,7 +39,7 @@ export default function NewPostPage() {
       scheduledAt: status === "scheduled" ? draft.scheduledAt : undefined,
       postedAt: status === "live" ? new Date().toISOString() : undefined,
     });
-    router.push(`/posts/${created.id}`);
+    router.push(routes.post(created.id));
   };
 
   const projectOptions = useMemo(

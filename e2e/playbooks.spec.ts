@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { resetWorkspace } from "./helpers";
+import { routes } from "../src/lib/routes";
 
 test.describe("Playbooks", () => {
   test.beforeEach(async ({ page }) => {
@@ -29,7 +30,7 @@ test.describe("Playbooks", () => {
   test("playbook detail surfaces hook + caption patterns", async ({
     page,
   }) => {
-    await page.goto("/playbooks/pb_3s_hook");
+    await page.goto(routes.playbook("pb_3s_hook"));
     await expect(
       page.getByRole("main").getByText(/Hook pattern/i),
     ).toBeVisible();
@@ -44,7 +45,7 @@ test.describe("Playbooks", () => {
   test("apply-playbook modal previews score before/after", async ({
     page,
   }) => {
-    await page.goto("/posts/po_brutalist_drop");
+    await page.goto(routes.post("po_brutalist_drop"));
     await page
       .getByRole("button", { name: /Apply playbook|Playbook · /i })
       .first()

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import {
   BarChart3,
   BookOpen,
@@ -22,6 +22,90 @@ import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Avatar } from "./ui/Avatar";
 import { StatusIcon } from "./StatusIcon";
+import { ROUTE_PATHS, routes } from "@/lib/routes";
+import { useIdParam } from "@/lib/route-hooks";
+import type { Project, Task } from "@/lib/types";
+
+/**
+ * The project list with at most one entry highlighted. Pure — it reads no
+ * URL state — so it doubles as the Suspense fallback below with nothing
+ * highlighted.
+ */
+function ProjectNavLinks({
+  projects,
+  activeProjectId,
+  itemClass,
+  onNavigate,
+}: {
+  projects: Project[];
+  activeProjectId: string | undefined;
+  itemClass: (active: boolean) => string;
+  onNavigate: () => void;
+}) {
+  return (
+    <>
+      {projects.map((p) => (
+        <Link
+          key={p.id}
+          href={routes.project(p.id)}
+          className={itemClass(p.id === activeProjectId)}
+          // Project pages share one pathname and differ only by ?id=, so the
+          // pathname-based drawer close below never fires for project →
+          // project; close explicitly on the click instead.
+          onClick={onNavigate}
+        >
+          <span
+            className="w-4 h-4 flex items-center justify-center border-[1.5px] border-ink font-mono text-[9px] font-bold shrink-0"
+            style={{ backgroundColor: p.accent }}
+          >
+            {p.icon}
+          </span>
+          <span className="truncate flex-1">{p.name}</span>
+          <StatusIcon status={p.status} size={10} />
+        </Link>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Resolves which project the current URL belongs to and renders the list.
+ * Record pages carry their id in the query (see src/lib/routes.ts), so this
+ * reads `?id=` — on the project view it is the project itself; on a task
+ * view it is the task's project, which preserves the old behavior of keeping
+ * a project highlighted while working inside one of its tasks. Reading search
+ * params requires a Suspense boundary, so this stays a leaf: the rest of the
+ * sidebar still prerenders.
+ */
+function ActiveProjectNavLinks({
+  projects,
+  tasks,
+  pathname,
+  itemClass,
+  onNavigate,
+}: {
+  projects: Project[];
+  tasks: Task[];
+  pathname: string;
+  itemClass: (active: boolean) => string;
+  onNavigate: () => void;
+}) {
+  const id = useIdParam();
+  const activeProjectId =
+    pathname === ROUTE_PATHS.project
+      ? id
+      : pathname === ROUTE_PATHS.task
+        ? tasks.find((t) => t.id === id)?.projectId
+        : undefined;
+  return (
+    <ProjectNavLinks
+      projects={projects}
+      activeProjectId={activeProjectId}
+      itemClass={itemClass}
+      onNavigate={onNavigate}
+    />
+  );
+}
 
 export function Sidebar({
   onNewTask,
@@ -207,25 +291,24 @@ export function Sidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-3 flex flex-col gap-0.5">
-        {projects.map((p) => {
-          const active = pathname.startsWith(`/projects/${p.id}`);
-          return (
-            <Link
-              key={p.id}
-              href={`/projects/${p.id}`}
-              className={item(active)}
-            >
-              <span
-                className="w-4 h-4 flex items-center justify-center border-[1.5px] border-ink font-mono text-[9px] font-bold shrink-0"
-                style={{ backgroundColor: p.accent }}
-              >
-                {p.icon}
-              </span>
-              <span className="truncate flex-1">{p.name}</span>
-              <StatusIcon status={p.status} size={10} />
-            </Link>
-          );
-        })}
+        <Suspense
+          fallback={
+            <ProjectNavLinks
+              projects={projects}
+              activeProjectId={undefined}
+              itemClass={item}
+              onNavigate={onMobileClose}
+            />
+          }
+        >
+          <ActiveProjectNavLinks
+            projects={projects}
+            tasks={tasks}
+            pathname={pathname}
+            itemClass={item}
+            onNavigate={onMobileClose}
+          />
+        </Suspense>
 
         {projects.length === 0 && (
           <div className="px-2 py-3 text-[11px] text-ink/50 font-mono uppercase">

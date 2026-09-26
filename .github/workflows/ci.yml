@@ -47,6 +47,22 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The Tauri desktop/mobile bundle is a static export with a stricter
+      # contract than the web build (no API, no middleware, no dynamic
+      # segments). This is the cheap, OS-independent proof that a frontend
+      # change did not break it; scripts/build-tauri.mjs fails on any missing
+      # page or leaked dynamic path. The mobile builds themselves run in
+      # mobile.yml.
+      - name: Build Tauri static export
+        run: npm run build:tauri
+
+      - name: Upload export manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-export-manifest
+          path: out/**/*.html
+          retention-days: 7
+
   e2e:
     name: E2E
     runs-on: ubuntu-latest
@@ -176,3 +192,70 @@ jobs:
               issue_number: context.issue.number,
               body,
             });
+
+  e2e-export:
+    name: E2E (Tauri static export)
+    # The same Playwright suite, run against the static export served through
+    # a faithful copy of Tauri's asset-resolver fallback chain
+    # (scripts/serve-export.mjs) instead of `next start`. Passing here AND in
+    # the e2e job is the guarantee that the web and desktop/mobile builds do
+    # not diverge — `next dev` has a real router and cannot expose the
+    # "dashboard renders at the wrong URL" failure this catches.
+    runs-on: ubuntu-latest
+    needs: verify
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Build Tauri static export
+        run: npm run build:tauri
+
+      - name: Run Playwright tests against the export
+        env:
+          CI: "true"
+          E2E_TARGET: export
+        run: npm run e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-export
+          path: playwright-report/
+          retention-days: 7
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results-export
+          path: |
+            test-results/
+            playwright-results.json
+          retention-days: 7

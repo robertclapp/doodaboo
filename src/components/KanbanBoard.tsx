@@ -8,6 +8,7 @@ import { PriorityIcon } from "./PriorityIcon";
 import { Avatar } from "./ui/Avatar";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { routes } from "@/lib/routes";
 
 export function KanbanBoard({ tasks }: { tasks: Task[] }) {
   const projects = useStore((s) => s.projects);
@@ -63,7 +64,7 @@ export function KanbanBoard({ tasks }: { tasks: Task[] }) {
                   );
                   return (
                     <Link
-                      href={`/projects/${t.projectId}/tasks/${t.id}`}
+                      href={routes.task(t.id)}
                       key={t.id}
                       draggable
                       onDragStart={() => setDraggingId(t.id)}

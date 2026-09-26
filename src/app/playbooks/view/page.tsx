@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
-import { useParams } from "next/navigation";
+import { Suspense, useMemo } from "react";
+import { useIdParam } from "@/lib/route-hooks";
 import { ArrowLeft, BookOpen } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { PlatformIcon } from "@/components/posts/PlatformIcon";
@@ -10,10 +10,32 @@ import { useStore } from "@/lib/store";
 import { useHydrated } from "@/lib/hooks";
 import { getPlaybook } from "@/lib/playbooks";
 import { describeBand, scoreIntrinsic, scoreLive } from "@/lib/virality";
+import { routes } from "@/lib/routes";
 
-export default function PlaybookDetailPage() {
+export default function PlaybookViewPage() {
+  // useIdParam reads the query string; Next 15 requires a Suspense boundary
+  // around any page that does. See src/lib/routes.ts.
+  return (
+    <Suspense fallback={null}>
+      <KeyedPlaybookDetailPage />
+    </Suspense>
+  );
+}
+
+/**
+ * Same pathname, different `?id=`: the App Router keeps one component
+ * instance across those navigations (search params are not part of a
+ * segment's state key), so per-record state — filters, drafts, the
+ * save-flash ref — would carry over from the previous record. Keying on
+ * the id remounts the page, exactly as a path segment used to.
+ */
+function KeyedPlaybookDetailPage() {
+  const id = useIdParam();
+  return <PlaybookDetailPage key={id} id={id} />;
+}
+
+function PlaybookDetailPage({ id: playbookId }: { id: string }) {
   const hydrated = useHydrated();
-  const { playbookId } = useParams<{ playbookId: string }>();
   const playbook = getPlaybook(playbookId);
   const posts = useStore((s) => s.posts);
 
@@ -177,7 +199,7 @@ export default function PlaybookDetailPage() {
                         {score.value.toFixed(0)}
                       </span>
                       <Link
-                        href={`/posts/${p.id}`}
+                        href={routes.post(p.id)}
                         className="truncate text-sm hover:underline"
                       >
                         {p.title || "Untitled"}

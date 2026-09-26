@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { routes } from "@/lib/routes";
 
 interface CommandItem {
   id: string;
@@ -230,7 +231,7 @@ export function CommandPalette({
           </span>
         ),
         onSelect: () => {
-          router.push(`/projects/${p.id}`);
+          router.push(routes.project(p.id));
           onClose();
         },
       })),
@@ -243,7 +244,7 @@ export function CommandPalette({
           group: "Tasks",
           icon: <ArrowRight size={12} />,
           onSelect: () => {
-            router.push(`/projects/${t.projectId}/tasks/${t.id}`);
+            router.push(routes.task(t.id));
             onClose();
           },
         };
@@ -255,7 +256,7 @@ export function CommandPalette({
         group: "Posts",
         icon: <Sparkles size={12} />,
         onSelect: () => {
-          router.push(`/posts/${p.id}`);
+          router.push(routes.post(p.id));
           onClose();
         },
       })),

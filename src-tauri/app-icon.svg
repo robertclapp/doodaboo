@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Doodaboo app icon: the web favicon's brutalist monospace "D" (paper on ink),
+       drawn as paths so it rasterizes identically with no font dependency.
+       Source for `npx tauri icon src-tauri/app-icon.svg` (regenerates src-tauri/icons). -->
+  <rect width="1024" height="1024" fill="#0a0a0a"/>
+  <path fill="#fafaf7" fill-rule="evenodd"
+        d="M 272 208 H 556 A 304 304 0 0 1 556 816 H 272 Z
+           M 412 348 V 676 H 556 A 164 164 0 0 0 556 348 Z"/>
+</svg>

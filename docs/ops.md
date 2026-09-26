@@ -7,7 +7,8 @@ to remember to run it.
 
 | When | Workflow | What it does |
 | --- | --- | --- |
-| Every push / PR | `.github/workflows/ci.yml` | verify (typecheck + lint + unit) → e2e on a separate job. Comments failure summaries on the PR. |
+| Every push / PR | `.github/workflows/ci.yml` | verify (typecheck + lint + unit + web build + `npm run build:tauri`) → `e2e` (against `next start`) and `e2e-export` (against the Tauri static export via `scripts/serve-export.mjs`), each on its own job. Comments failure summaries on the PR. |
+| Mondays 10:00 UTC, on demand, and on PRs/pushes touching `src-tauri/**` or the export pipeline | `.github/workflows/mobile.yml` | Unsigned Android debug APK (ubuntu-24.04) + unsigned iOS simulator `.app` (macos-latest), uploaded as run artifacts. Opens an `ops:mobile` issue on scheduled failure. |
 | Daily 06:00 UTC | `.github/workflows/scheduled.yml` → `verify` | Full verify + e2e against `main`. Catches dep drift, time-sensitive seeds, Playwright browser-cache misses. Opens an `ops:nightly`-labelled issue on failure (reuses one issue/day rather than spamming). |
 | Mondays 09:00 UTC | `.github/workflows/scheduled.yml` → `tauri-sanity` | `cargo check` for the Tauri crate on Linux / macOS / Windows. Catches Tauri version drift, system-lib breakage on the Linux build agents, Rust toolchain regressions. Opens an `ops:tauri` issue on failure. |
 | Tag push `v*` | `.github/workflows/release.yml` | Builds signed Tauri binaries for all four platform targets, drafts a GitHub release with installers + updater JSON. |
@@ -16,6 +17,7 @@ Trigger any of them manually from the **Actions** tab in GitHub:
 
 ```text
 Actions → "Scheduled" → Run workflow → pick job: verify | tauri-sanity | audit
+Actions → "Mobile"    → Run workflow   (Android + iOS proof-of-build)
 ```
 
 The `audit` job is workflow-dispatch only — run it before tagging a
@@ -65,7 +67,9 @@ parallel agents can't see each other's output until they finish.
 ## When you change ops infrastructure
 
 - `ci.yml` and `release.yml` run on push events — your next push will
-  exercise the change. Watch the Actions tab.
+  exercise the change. Watch the Actions tab. `mobile.yml` runs on pushes
+  and PRs too, but only when `src-tauri/**`, the export pipeline, or the
+  workflow itself changed.
 - `scheduled.yml` doesn't run on push; trigger it via workflow-dispatch
   after editing so you don't wait 24 hours to discover it's broken.
 
