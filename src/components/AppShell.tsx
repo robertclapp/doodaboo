@@ -6,7 +6,6 @@ import { Sidebar } from "./Sidebar";
 import { CommandPalette } from "./CommandPalette";
 import { NewTaskModal } from "./NewTaskModal";
 import { ShortcutsModal } from "./ShortcutsModal";
-import { ToastProvider } from "./ToastProvider";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -57,7 +56,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [anyModalOpen, openNewTask]);
 
   return (
-    <ToastProvider>
+    <>
       <div className="flex min-h-screen">
         <Sidebar
           onNewTask={() => openNewTask()}
@@ -109,6 +108,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           onClose={() => setShortcutsOpen(false)}
         />
       </div>
-    </ToastProvider>
+    </>
   );
 }

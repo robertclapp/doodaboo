@@ -49,6 +49,14 @@ export interface AuthInput {
    * were a public deployment. Never honored once a token is configured.
    */
   localServe?: boolean;
+  /**
+   * True when this build talks to a Convex deployment (NEXT_PUBLIC_CONVEX_URL
+   * set). The HTTP API serves the server-side vault, which is a different,
+   * single-tenant dataset from the cloud workspaces the UI shows; serving
+   * both from one origin only invites confusion, so the API is off in cloud
+   * mode except for `doodaboo serve` on loopback.
+   */
+  cloudMode?: boolean;
 }
 
 /** True for routes that must stay reachable without credentials. */
@@ -67,6 +75,15 @@ export function bearerToken(authorization: string | null): string | undefined {
 
 export function authorizeApiRequest(input: AuthInput): AuthDecision {
   if (isOpenPath(input.pathname)) return { ok: true };
+
+  if (input.cloudMode && !input.localServe) {
+    return {
+      ok: false,
+      status: 503,
+      message:
+        "This deployment is in cloud mode (NEXT_PUBLIC_CONVEX_URL is set); the local HTTP API is disabled. Workspace data lives in the Convex deployment.",
+    };
+  }
 
   const configured = input.token?.trim();
   if (!configured) {

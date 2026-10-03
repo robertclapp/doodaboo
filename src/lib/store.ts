@@ -4,6 +4,9 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { createTauriStorage, isTauri } from "./tauri-storage";
 import { demoPostsEnabled } from "./seed";
+import { CLOUD_PREFS_KEY, isCloud } from "./backend";
+import { deepEqual } from "./deep-equal";
+import { Op, toWirePatch } from "./ops";
 import {
   Comment,
   EngagementSnapshot,
@@ -63,8 +66,40 @@ export interface ExportPayload {
   currentUserId?: string;
 }
 
+/**
+ * What the cloud layer plugs into the store when a workspace is live.
+ *
+ * In cloud mode the store is a mirror of the Convex `workspace.get` query:
+ * reads come from `ingestCloudView`, and every write goes through
+ * `apply`, which returns the op's result synchronously (the created record,
+ * computed locally with the same seed the server will replay) while the
+ * mutation is in flight. See src/lib/ops.ts and
+ * src/components/cloud/WorkspaceSync.tsx.
+ */
+export interface CloudBridge {
+  workspaceId: string;
+  workspaceName: string;
+  role: "owner" | "member";
+  account: { email: string | null; userId: string };
+  apply: (op: Op) => unknown;
+  /** Replace all content (owner only) — Settings → Import in cloud mode. */
+  replaceContent: (payload: ExportPayload) => Promise<void>;
+  switchWorkspace: () => void;
+  signOut: () => Promise<void>;
+}
+
+/** The reactive read model the cloud layer feeds in. */
+export interface CloudView {
+  id: string;
+  name: string;
+  role: "owner" | "member";
+  state: WorkspaceState;
+}
+
 interface StoreState extends WorkspaceState {
   hydrated: boolean;
+  /** Non-null while a cloud workspace is mirrored into this store. */
+  cloud: CloudBridge | null;
 
   setHydrated: (v: boolean) => void;
   setTheme: (t: Theme) => void;
@@ -145,25 +180,58 @@ function extract(s: StoreState): WorkspaceState {
   };
 }
 
+/**
+ * Route a write: through the cloud bridge when a workspace is live, else
+ * through the local pure mutation. The bridge returns the same result type
+ * the local path does, so callers never know which one ran.
+ */
+function route<T>(get: () => StoreState, op: Op, local: () => T): T {
+  const bridge = get().cloud;
+  return bridge ? (bridge.apply(op) as T) : local();
+}
+
+/** Actions that only make sense for a device-local workspace. */
+function assertLocal(get: () => StoreState, what: string): void {
+  if (get().cloud) {
+    throw new Error(`${what} is not available in cloud mode; manage the workspace from Settings → Cloud`);
+  }
+}
+
+// Decided once per page load: a cloud build with a valid deployment URL and
+// no device override. In cloud mode the store starts empty, is never persisted
+// to the local vault (only the theme is, under its own key), and is filled by
+// the reactive query. See src/lib/backend.ts.
+const cloudMode = isCloud();
+
 // Fresh workspaces honor the NEXT_PUBLIC_DEMO_POSTS flag (inlined at
 // build time in both the server and client bundles, so SSR and CSR
 // agree). The pure mutation layer stays deterministic — the env read
 // happens only here, at the web entry point.
-const seed = emptyWorkspace({ demoPosts: demoPostsEnabled() });
+const seed: WorkspaceState = cloudMode
+  ? { ...blankWorkspace(), users: [], currentUserId: "" }
+  : emptyWorkspace({ demoPosts: demoPostsEnabled() });
 
 export const useStore = create<StoreState>()(
   persist(
     (set, get) => ({
       ...seed,
       hydrated: false,
+      cloud: null,
 
       setHydrated: (v) => set({ hydrated: v }),
+      // Theme is a device preference in both modes; never an op.
       setTheme: (theme) => apply(set, get, (s) => setThemeMut(s, theme)),
       // "Reset to demo data" is an explicit request for the demo, so it
       // always includes demo posts regardless of the fresh-account flag.
-      resetToSeed: () => set({ ...emptyWorkspace({ demoPosts: true }) }),
+      resetToSeed: () => {
+        assertLocal(get, "Reset to demo data");
+        set({ ...emptyWorkspace({ demoPosts: true }) });
+      },
       // Starting blank wipes content, not preferences — keep the theme.
-      resetToBlank: () => set({ ...blankWorkspace(), theme: get().theme }),
+      resetToBlank: () => {
+        assertLocal(get, "Start blank workspace");
+        set({ ...blankWorkspace(), theme: get().theme });
+      },
       exportState: () => ({
         version: EXPORT_VERSION,
         exportedAt: new Date().toISOString(),
@@ -180,6 +248,7 @@ export const useStore = create<StoreState>()(
             `Unsupported export version ${payload.version} (expected ${EXPORT_VERSION})`,
           );
         }
+        assertLocal(get, "Import");
         set({
           users: payload.users,
           labels: payload.labels,
@@ -194,84 +263,198 @@ export const useStore = create<StoreState>()(
         });
       },
 
-      setCurrentUser: (id) => apply(set, get, (s) => setCurrentUserMut(s, id)),
-      addUser: (u) => applyAnd(set, get, (s) => addUserAdapter(s, u)),
-      removeUser: (id) => apply(set, get, (s) => removeUserMut(s, id)),
+      setCurrentUser: (id) => {
+        assertLocal(get, "Switching the active user");
+        apply(set, get, (s) => setCurrentUserMut(s, id));
+      },
+      addUser: (u) => {
+        assertLocal(get, "Adding a member");
+        return applyAnd(set, get, (s) => addUserAdapter(s, u));
+      },
+      removeUser: (id) => {
+        assertLocal(get, "Removing a member");
+        apply(set, get, (s) => removeUserMut(s, id));
+      },
 
-      addLabel: (l) => applyAnd(set, get, (s) => addLabelAdapter(s, l)),
-      removeLabel: (id) => apply(set, get, (s) => removeLabelMut(s, id)),
+      addLabel: (l) =>
+        route(get, { type: "addLabel", data: l }, () =>
+          applyAnd(set, get, (s) => addLabelAdapter(s, l)),
+        ),
+      removeLabel: (id) =>
+        route(get, { type: "removeLabel", id }, () =>
+          apply(set, get, (s) => removeLabelMut(s, id)),
+        ),
 
       createProject: (data) =>
-        applyAnd(set, get, (s) => createProjectAdapter(s, data)),
+        route(get, { type: "createProject", data }, () =>
+          applyAnd(set, get, (s) => createProjectAdapter(s, data)),
+        ),
       updateProject: (id, patch) =>
-        apply(set, get, (s) => updateProjectMut(s, id, patch)),
-      deleteProject: (id) => apply(set, get, (s) => deleteProjectMut(s, id)),
+        route(get, { type: "updateProject", id, ...toWirePatch(patch) }, () =>
+          apply(set, get, (s) => updateProjectMut(s, id, patch)),
+        ),
+      deleteProject: (id) =>
+        route(get, { type: "deleteProject", id }, () =>
+          apply(set, get, (s) => deleteProjectMut(s, id)),
+        ),
       restoreProject: (snapshot) =>
-        apply(set, get, (s) => restoreProjectMut(s, snapshot)),
+        route(get, { type: "restoreProject", id: snapshot.project.id }, () =>
+          apply(set, get, (s) => restoreProjectMut(s, snapshot)),
+        ),
 
       createTask: (data) =>
-        applyAnd(set, get, (s) => createTaskAdapter(s, data)),
+        route(get, { type: "createTask", data }, () =>
+          applyAnd(set, get, (s) => createTaskAdapter(s, data)),
+        ),
       updateTask: (id, patch) =>
-        apply(set, get, (s) => updateTaskMut(s, id, patch)),
-      deleteTask: (id) => apply(set, get, (s) => deleteTaskMut(s, id)),
+        route(get, { type: "updateTask", id, ...toWirePatch(patch) }, () =>
+          apply(set, get, (s) => updateTaskMut(s, id, patch)),
+        ),
+      deleteTask: (id) =>
+        route(get, { type: "deleteTask", id }, () =>
+          apply(set, get, (s) => deleteTaskMut(s, id)),
+        ),
       restoreTask: (snapshot) =>
-        apply(set, get, (s) => restoreTaskMut(s, snapshot)),
+        route(get, { type: "restoreTask", id: snapshot.id }, () =>
+          apply(set, get, (s) => restoreTaskMut(s, snapshot)),
+        ),
       moveTaskStatus: (id, status) =>
-        apply(set, get, (s) => moveTaskStatusMut(s, id, status)),
-      addComment: (taskId, body) => {
-        const r = addCommentMut(extract(get()), taskId, body);
-        set(r.state as Partial<StoreState>);
-        return r.comment;
-      },
+        route(get, { type: "moveTaskStatus", id, status }, () =>
+          apply(set, get, (s) => moveTaskStatusMut(s, id, status)),
+        ),
+      addComment: (taskId, body) =>
+        route(get, { type: "addComment", taskId, body }, () => {
+          const r = addCommentMut(extract(get()), taskId, body);
+          set(r.state as Partial<StoreState>);
+          return r.comment;
+        }),
 
       createPost: (data) =>
-        applyAnd(set, get, (s) => createPostAdapter(s, data)),
+        route(get, { type: "createPost", data }, () =>
+          applyAnd(set, get, (s) => createPostAdapter(s, data)),
+        ),
       updatePost: (id, patch) =>
-        apply(set, get, (s) => updatePostMut(s, id, patch)),
-      deletePost: (id) => apply(set, get, (s) => deletePostMut(s, id)),
+        route(get, { type: "updatePost", id, ...toWirePatch(patch) }, () =>
+          apply(set, get, (s) => updatePostMut(s, id, patch)),
+        ),
+      deletePost: (id) =>
+        route(get, { type: "deletePost", id }, () =>
+          apply(set, get, (s) => deletePostMut(s, id)),
+        ),
       restorePost: (snapshot) =>
-        apply(set, get, (s) => restorePostMut(s, snapshot)),
-      duplicatePost: (id, opts) => {
-        const r = duplicatePostMut(extract(get()), id, opts);
-        set(r.state as Partial<StoreState>);
-        return r.post;
-      },
-      addSnapshot: (postId, snapshot) => {
-        const r = addSnapshotMut(extract(get()), postId, snapshot);
-        set(r.state as Partial<StoreState>);
-        return r.snapshot;
-      },
+        route(get, { type: "restorePost", id: snapshot.id }, () =>
+          apply(set, get, (s) => restorePostMut(s, snapshot)),
+        ),
+      duplicatePost: (id, opts) =>
+        route(
+          get,
+          { type: "duplicatePost", id, ...(opts?.titleSuffix !== undefined ? { titleSuffix: opts.titleSuffix } : {}) },
+          () => {
+            const r = duplicatePostMut(extract(get()), id, opts);
+            set(r.state as Partial<StoreState>);
+            return r.post;
+          },
+        ),
+      addSnapshot: (postId, snapshot) =>
+        route(get, { type: "addSnapshot", postId, snapshot }, () => {
+          const r = addSnapshotMut(extract(get()), postId, snapshot);
+          set(r.state as Partial<StoreState>);
+          return r.snapshot;
+        }),
       removeSnapshot: (postId, snapshotId) =>
-        apply(set, get, (s) => removeSnapshotMut(s, postId, snapshotId)),
+        route(get, { type: "removeSnapshot", postId, snapshotId }, () =>
+          apply(set, get, (s) => removeSnapshotMut(s, postId, snapshotId)),
+        ),
     }),
     {
-      name: "doodaboo-v1",
+      // Local mode persists the workspace under the vault key. Cloud mode
+      // persists only the theme, under its own key, so a cloud session can
+      // never overwrite the device's local workspace (or, inside Tauri, the
+      // on-disk vault the CLI shares).
+      name: cloudMode ? CLOUD_PREFS_KEY : "doodaboo-v1",
       skipHydration: true,
-      // Inside Tauri's webview, persist routes through Rust commands so
-      // the desktop app reads/writes the on-disk vault directly. On the
-      // web, it falls back to localStorage.
-      storage: isTauri()
-        ? createTauriStorage()
-        : createJSONStorage(() =>
-            typeof window === "undefined"
-              ? (undefined as unknown as Storage)
-              : window.localStorage,
-          ),
-      partialize: (s) => ({
-        theme: s.theme,
-        currentUserId: s.currentUserId,
-        users: s.users,
-        labels: s.labels,
-        projects: s.projects,
-        tasks: s.tasks,
-        posts: s.posts,
-      }),
+      // Inside Tauri's webview, local-mode persistence routes through Rust
+      // commands so the desktop app reads/writes the on-disk vault
+      // directly. On the web, it falls back to localStorage.
+      storage:
+        !cloudMode && isTauri()
+          ? createTauriStorage()
+          : createJSONStorage(() =>
+              typeof window === "undefined"
+                ? (undefined as unknown as Storage)
+                : window.localStorage,
+            ),
+      partialize: (s) =>
+        cloudMode
+          ? { theme: s.theme }
+          : {
+              theme: s.theme,
+              currentUserId: s.currentUserId,
+              users: s.users,
+              labels: s.labels,
+              projects: s.projects,
+              tasks: s.tasks,
+              posts: s.posts,
+            },
+      merge: (persisted, current) =>
+        cloudMode
+          ? { ...current, theme: (persisted as { theme?: Theme } | undefined)?.theme ?? current.theme }
+          : { ...current, ...(persisted as Partial<StoreState>) },
       onRehydrateStorage: () => (state) => {
-        state?.setHydrated(true);
+        // In cloud mode `hydrated` means "the store mirrors a workspace";
+        // WorkspaceSync flips it after the first query result.
+        if (!cloudMode) state?.setHydrated(true);
       },
     },
   ),
 );
+
+/**
+ * Feed a `workspace.get` result into the store. Records that did not change
+ * keep their object identity (and an unchanged collection keeps its array),
+ * so selectors across the app do not re-render on every remote edit. The
+ * device's theme is kept; the server's "system" placeholder is ignored.
+ */
+export function ingestCloudView(view: CloudView): void {
+  const prev = useStore.getState();
+  const next = view.state;
+  useStore.setState({
+    currentUserId: next.currentUserId,
+    users: share(prev.users, next.users),
+    labels: share(prev.labels, next.labels),
+    projects: share(prev.projects, next.projects),
+    tasks: share(prev.tasks, next.tasks),
+    posts: share(prev.posts, next.posts),
+    hydrated: true,
+  });
+}
+
+function share<T extends { id: string }>(prev: T[], next: T[]): T[] {
+  const byId = new Map(prev.map((r) => [r.id, r]));
+  let unchanged = prev.length === next.length;
+  const out = next.map((r, i) => {
+    const old = byId.get(r.id);
+    if (old && deepEqual(old, r)) {
+      if (prev[i] !== old) unchanged = false;
+      return old;
+    }
+    unchanged = false;
+    return r;
+  });
+  return unchanged ? prev : out;
+}
+
+/** Leave cloud mode's mirror (sign-out, workspace switch, account change). */
+export function clearCloudWorkspace(): void {
+  useStore.setState({
+    ...blankWorkspace(),
+    users: [],
+    currentUserId: "",
+    theme: useStore.getState().theme,
+    hydrated: false,
+    cloud: null,
+  });
+}
 
 // Tiny inline adapters that thread the result tuple cleanly. Keeps the
 // store body shaped like the actions object the rest of the app uses.
