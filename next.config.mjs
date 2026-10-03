@@ -27,6 +27,10 @@ const ID = {
 const nextConfig = {
   reactStrictMode: true,
 
+  // `next lint` only scans app/pages/components/lib/src by default; the
+  // backend, CLI, scripts and E2E suites should see the same rules.
+  eslint: { dirs: ["src", "convex", "cli", "scripts", "e2e"] },
+
   ...(isStaticExport
     ? {
         output: "export",

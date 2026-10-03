@@ -9,6 +9,7 @@
  *   - `export --markdown` safeFilename traversal defense
  *   - basic init/list smoke
  */
+import { statSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -107,7 +108,7 @@ describe("doodaboo init", () => {
     const r = run(["init", root]);
     assert.equal(r.status, 0);
     // The vault should exist now.
-    const stat = require("node:fs").statSync(path.join(root, "workspace.json"));
+    const stat = statSync(path.join(root, "workspace.json"));
     assert.ok(stat.isFile());
   });
 

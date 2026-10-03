@@ -10,25 +10,28 @@
  *
  * This script produces the same files from the CLI's own template functions
  * (node_modules/convex/dist/esm/cli/codegen_templates), so the output is what
- * the real codegen writes for a root project without components, in the
- * default "js/dts" layout: api.js, api.d.ts, server.js, server.d.ts,
- * dataModel.d.ts. The only difference is that the real api.d.ts also exports
- * a `components` object (empty for this project) — nothing here imports it.
+ * the real codegen writes for a root project without child components, in
+ * the default "js/dts" layout: api.js, api.d.ts, server.js, server.d.ts,
+ * dataModel.d.ts — including the (empty) `components` export.
  *
  * Running `npx convex dev` later overwrites the directory with the canonical
  * output; the file names are identical so nothing is left stale.
  */
 import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const convexDir = path.join(root, "convex");
 const outDir = path.join(convexDir, "_generated");
-const require = createRequire(import.meta.url);
+// The templates are not in the package's `exports` map, so import them by
+// file path rather than by specifier.
 const templates = (name) =>
-  import(require.resolve(`convex/dist/esm/cli/codegen_templates/${name}.js`));
+  import(
+    pathToFileURL(
+      path.join(root, "node_modules", "convex", "dist", "esm", "cli", "codegen_templates", `${name}.js`),
+    ).href
+  );
 
 /**
  * Function modules: every file under convex/ that the bundler treats as an
@@ -63,20 +66,117 @@ if (modules.length === 0) {
   process.exit(1);
 }
 
-const [{ apiCodegen }, { serverCodegen }, { dynamicDataModelDTS }] = await Promise.all([
-  templates("api"),
-  templates("server"),
-  templates("dataModel"),
-]);
+const [{ importPath, moduleIdentifier }, { apiComment, compareModulePaths, header }, { serverCodegen }] =
+  await Promise.all([templates("api"), templates("common"), templates("server")]);
 
-const api = apiCodegen(modules, { useTypeScript: false });
+// dynamicDataModelDTS() from codegen_templates/dataModel.js, inlined for the
+// same reason (that module imports the CLI's config loader). With a reachable
+// deployment the CLI writes the *static* form instead — every table spelled
+// out from the analysis — which is type-equivalent to this one; the owner's
+// first `npx convex dev` rewrites the file in that form.
+function dataModelDTS() {
+  return `
+  ${header("Generated data model types.")}
+  import type { DataModelFromSchemaDefinition, DocumentByName, TableNamesInDataModel, SystemTableNames } from "convex/server";
+  import type { GenericId } from "convex/values";
+  import schema from "../schema.js";
+
+  /**
+   * The names of all of your Convex tables.
+   */
+  export type TableNames = TableNamesInDataModel<DataModel>;
+
+  /**
+   * The type of a document stored in Convex.
+   *
+   * @typeParam TableName - A string literal type of the table name (like "users").
+   */
+  export type Doc<TableName extends TableNames> = DocumentByName<DataModel, TableName>;
+
+  /**
+   * An identifier for a document in Convex.
+   *
+   * Convex documents are uniquely identified by their \`Id\`, which is accessible
+   * on the \`_id\` field. To learn more, see [Document IDs](https://docs.convex.dev/using/document-ids).
+   *
+   * Documents can be loaded using \`db.get(tableName, id)\` in query and mutation functions.
+   *
+   * IDs are just strings at runtime, but this type can be used to distinguish them from other
+   * strings when type checking.
+   *
+   * @typeParam TableName - A string literal type of the table name (like "users").
+   */
+  export type Id<TableName extends TableNames | SystemTableNames> = GenericId<TableName>;
+
+  /**
+   * A type describing your Convex data model.
+   *
+   * This type includes information about what tables you have, the type of
+   * documents stored in those tables, and the indexes defined on them.
+   *
+   * This type is used to parameterize methods like \`queryGeneric\` and
+   * \`mutationGeneric\` to make them type-safe.
+   */
+  export type DataModel = DataModelFromSchemaDefinition<typeof schema>;
+  `;
+}
+
+// componentApiJs() from codegen_templates/component_api.js, inlined: that
+// module imports the bundler, whose dependencies are not installed here.
+function apiJS() {
+  return [
+    header("Generated `api` utility."),
+    `
+    import { anyApi, componentsGeneric } from "convex/server";
+
+    ${apiComment("api", undefined)}
+    export const api = anyApi;
+    export const internal = anyApi;
+    export const components = componentsGeneric();
+  `,
+  ].join("\n");
+}
+
+// api.d.ts exactly as componentApiDTS() writes it for a root project with no
+// child components: the dynamic api objects, then an empty `components`.
+function apiDTS(modulePaths) {
+  const sorted = [...modulePaths].sort(compareModulePaths);
+  const lines = [header("Generated `api` utility.")];
+  for (const modulePath of sorted) {
+    lines.push(`import type * as ${moduleIdentifier(modulePath)} from "../${importPath(modulePath)}.js";`);
+  }
+  lines.push(`
+    import type {
+      ApiFromModules,
+      FilterApi,
+      FunctionReference,
+    } from "convex/server";
+
+    declare const fullApi: ApiFromModules<{
+  `);
+  for (const modulePath of sorted) {
+    lines.push(`  "${importPath(modulePath)}": typeof ${moduleIdentifier(modulePath)},`);
+  }
+  lines.push(`}>;`);
+  lines.push(`
+    ${apiComment("api", "public")}
+    export declare const api: FilterApi<typeof fullApi, FunctionReference<any, "public">>;
+    ${apiComment("internal", "internal")}
+    export declare const internal: FilterApi<typeof fullApi, FunctionReference<any, "internal">>;
+  `);
+  lines.push(`
+  export declare const components: {`);
+  lines.push("};");
+  return lines.join("\n");
+}
+
 const server = serverCodegen({ useTypeScript: false, envVars: undefined });
 const files = {
-  "api.js": api.JS,
-  "api.d.ts": api.DTS,
+  "api.js": apiJS(),
+  "api.d.ts": apiDTS(modules),
   "server.js": server.JS,
   "server.d.ts": server.DTS,
-  "dataModel.d.ts": dynamicDataModelDTS(),
+  "dataModel.d.ts": dataModelDTS(),
 };
 
 let prettier = null;
