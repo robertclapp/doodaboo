@@ -60,6 +60,9 @@ export const routes = {
   team: "/team",
   labels: "/labels",
   settings: "/settings",
+  /** Invite links land here; the page redeems the token for the signed-in account (cloud mode). */
+  join: "/join",
+  joinInvite: (token: string): string => `/join?token=${encodeURIComponent(token)}`,
 
   posts: "/posts",
   newPost: "/posts/new",

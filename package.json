@@ -14,28 +14,32 @@
     "lint:fix": "next lint --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,md,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,md,json}\"",
-    "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx src/lib/api.test.ts src/lib/api-auth.test.ts src/lib/hooks-generator.test.ts src/lib/mutations.test.ts src/lib/myDay.test.ts src/lib/playbooks.test.ts src/lib/routes.test.ts src/lib/seed.test.ts src/lib/tauri-storage.test.ts src/lib/utils.test.ts src/lib/vault.test.ts src/lib/virality.test.ts src/app/api/api.test.ts cli/util.test.ts cli/commands/dash.test.ts cli/commands/report.test.ts",
+    "typecheck": "tsc --noEmit && tsc -p convex/tsconfig.json --noEmit",
+    "test": "node --test --import tsx src/lib/api.test.ts src/lib/api-auth.test.ts src/lib/backend.test.ts src/lib/connection-status.test.ts src/lib/hooks-generator.test.ts src/lib/mutations.test.ts src/lib/myDay.test.ts src/lib/ops.test.ts src/lib/playbooks.test.ts src/lib/routes.test.ts src/lib/seed.test.ts src/lib/tauri-storage.test.ts src/lib/utils.test.ts src/lib/vault.test.ts src/lib/virality.test.ts src/app/api/api.test.ts cli/util.test.ts cli/commands/dash.test.ts cli/commands/report.test.ts",
     "test:cli": "node --test --import tsx cli/cli.test.ts",
-    "test:all": "npm test && npm run test:cli",
+    "test:convex": "vitest run",
+    "test:all": "npm test && npm run test:cli && npm run test:convex",
     "e2e": "playwright test",
     "e2e:install": "playwright install chromium",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report",
-    "verify": "npm run typecheck && npm run lint && npm test",
+    "verify": "npm run typecheck && npm run lint && npm test && npm run test:convex",
     "cli": "tsx cli/index.ts",
     "doodaboo": "tsx cli/index.ts",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "tauri:restore": "node scripts/build-tauri.mjs --restore-only"
+    "tauri:restore": "node scripts/build-tauri.mjs --restore-only",
+    "convex:codegen:offline": "node scripts/convex-codegen-offline.mjs"
   },
   "bin": {
     "doodaboo": "./bin/doodaboo.js"
   },
   "dependencies": {
+    "@convex-dev/auth": "^0.0.95",
     "@tauri-apps/api": "^2.11.0",
     "clsx": "^2.1.1",
+    "convex": "^1.46.0",
     "lucide-react": "^0.454.0",
     "nanoid": "^5.0.7",
     "next": "^15.5.16",
@@ -44,18 +48,21 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@playwright/test": "^1.59.1",
     "@tauri-apps/cli": "~2.11.4",
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "autoprefixer": "^10.4.20",
+    "convex-test": "^0.0.60",
     "eslint": "^8.57.1",
     "eslint-config-next": "^15.5.16",
     "postcss": "^8.4.49",
     "prettier": "^3.8.3",
     "tailwindcss": "^3.4.14",
     "tsx": "^4.21.0",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^5.0.2"
   }
 }

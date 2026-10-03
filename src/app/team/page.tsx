@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
@@ -21,7 +22,19 @@ const USER_COLORS = [
   "#c4f000",
 ];
 
+// Cloud mode manages members on the server (invite links, roles, profiles);
+// the component lives in a chunk only cloud builds download.
+const TeamCloud = dynamic(() => import("@/components/cloud/TeamCloud"), {
+  ssr: false,
+});
+
 export default function TeamPage() {
+  const cloud = useStore((s) => s.cloud);
+  if (cloud) return <TeamCloud />;
+  return <TeamLocal />;
+}
+
+function TeamLocal() {
   const users = useStore((s) => s.users);
   const currentUserId = useStore((s) => s.currentUserId);
   const setCurrentUser = useStore((s) => s.setCurrentUser);
@@ -104,7 +117,9 @@ export default function TeamPage() {
                   <div className="font-mono text-[9px] uppercase tracking-widest text-ink/50">
                     Open
                   </div>
-                  <div className="text-xl font-bold tabular-nums">{openCount}</div>
+                  <div className="text-xl font-bold tabular-nums">
+                    {openCount}
+                  </div>
                 </div>
                 <div className="border-[1.5px] border-ink/20 p-2">
                   <div className="font-mono text-[9px] uppercase tracking-widest text-ink/50">

@@ -44,6 +44,11 @@ jobs:
       - name: CLI tests
         run: npm run test:cli
 
+      # The Convex backend, run by convex-test's in-memory backend: real
+      # sign-up/sign-in, membership enforcement, op replay, invites.
+      - name: Convex backend tests
+        run: npm run test:convex
+
       - name: Build
         run: npm run build
 
@@ -62,6 +67,20 @@ jobs:
           name: tauri-export-manifest
           path: out/**/*.html
           retention-days: 7
+
+      # The cloud code path is tree-shaken out of a local-first build, so
+      # compile it too: a web build and a cloud Tauri bundle against a
+      # placeholder deployment URL (nothing connects at build time).
+      - name: Build (cloud mode)
+        env:
+          NEXT_PUBLIC_CONVEX_URL: https://example-123.convex.cloud
+        run: npm run build
+
+      - name: Build Tauri static export (cloud bundle)
+        env:
+          NEXT_PUBLIC_CONVEX_URL: https://example-123.convex.cloud
+          DOODABOO_TAURI_CLOUD: "1"
+        run: npm run build:tauri
 
   e2e:
     name: E2E
@@ -258,4 +277,60 @@ jobs:
           path: |
             test-results/
             playwright-results.json
+          retention-days: 7
+
+  e2e-cloud-offline:
+    name: E2E (cloud mode, no deployment)
+    # A web build pointed at an unreachable deployment proves the sign-in
+    # gate, the untouched local vault, the connection banner and the local
+    # escape hatch (e2e/cloud-offline.spec.ts) without any Convex credentials.
+    runs-on: ubuntu-latest
+    needs: verify
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Build (cloud mode, unreachable deployment)
+        env:
+          NEXT_PUBLIC_CONVEX_URL: http://127.0.0.1:9
+        run: npm run build
+
+      - name: Run the cloud-offline spec
+        env:
+          CI: "true"
+          E2E_TARGET: cloud-offline
+        run: npm run e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-cloud-offline
+          path: playwright-report/
           retention-days: 7
