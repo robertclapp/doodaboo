@@ -5,6 +5,8 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { WorkspaceState } from "../src/lib/mutations";
 import type { CollectionScope, OpScope } from "../src/lib/ops";
 import type { Label, Post, Project, Task, User } from "../src/lib/types";
+import { getDocumentSize } from "convex/values";
+import { checkRecord, type RecordKind } from "../src/lib/limits";
 
 /**
  * Shared helpers for the workspace functions: who is calling, what they may
@@ -230,6 +232,91 @@ export async function loadState(
   };
 }
 
+// ── Budgeted read model ─────────────────────────────────────────────────────
+
+/**
+ * Convex fails a function that reads more than 16 MiB or 32,000 documents.
+ * `workspace.get` reads the whole workspace, so it reads against a budget
+ * well inside both and, if a workspace ever outgrows it, returns what fits —
+ * newest records first — and names the collections it had to cut, instead
+ * of failing for every member. The headroom covers the membership, user and
+ * workspace documents read alongside, and the one document read past the
+ * budget before a scan stops (records are capped at LIMITS.recordBytes).
+ */
+export const READ_BUDGET_BYTES = 12 * 1024 * 1024;
+export const READ_BUDGET_DOCS = 24_000;
+/** Posts may use at most this share of what is left after labels and projects, so issues always get room. */
+const POSTS_SHARE = 0.35;
+
+function scanQuery<T extends Table>(ctx: Ctx, table: T, workspaceId: Id<"workspaces">): AsyncIterable<Doc<T>> {
+  switch (table) {
+    case "labels":
+      return ctx.db.query("labels").withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId)).order("desc") as unknown as AsyncIterable<Doc<T>>;
+    case "projects":
+      return ctx.db.query("projects").withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId)).order("desc") as unknown as AsyncIterable<Doc<T>>;
+    case "tasks":
+      return ctx.db.query("tasks").withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId)).order("desc") as unknown as AsyncIterable<Doc<T>>;
+    default:
+      return ctx.db.query("posts").withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId)).order("desc") as unknown as AsyncIterable<Doc<T>>;
+  }
+}
+
+async function scan<T extends Table>(
+  ctx: Ctx,
+  table: T,
+  workspaceId: Id<"workspaces">,
+  budget: { bytes: number; docs: number },
+  maxBytes: number,
+): Promise<{ docs: Doc<T>[]; truncated: boolean }> {
+  const docs: Doc<T>[] = [];
+  let used = 0;
+  let truncated = false;
+  for await (const doc of scanQuery(ctx, table, workspaceId)) {
+    const size = getDocumentSize(doc as never);
+    if (used + size > maxBytes || budget.docs <= 0) {
+      truncated = true;
+      break;
+    }
+    used += size;
+    budget.docs--;
+    docs.push(doc);
+  }
+  budget.bytes -= used;
+  return { docs, truncated };
+}
+
+export async function loadViewBudgeted(
+  ctx: Ctx,
+  workspaceId: Id<"workspaces">,
+  currentUserId: Id<"users">,
+  limits: { bytes: number; docs: number } = { bytes: READ_BUDGET_BYTES, docs: READ_BUDGET_DOCS },
+): Promise<{ state: WorkspaceState; truncated: RecordKind[] }> {
+  const budget = { ...limits };
+  const { users } = await loadMembers(ctx, workspaceId);
+  const labels = await scan(ctx, "labels", workspaceId, budget, budget.bytes);
+  const projects = await scan(ctx, "projects", workspaceId, budget, budget.bytes);
+  const posts = await scan(ctx, "posts", workspaceId, budget, Math.floor(budget.bytes * POSTS_SHARE));
+  const tasks = await scan(ctx, "tasks", workspaceId, budget, budget.bytes);
+  const truncated: RecordKind[] = [];
+  if (labels.truncated) truncated.push("labels");
+  if (projects.truncated) truncated.push("projects");
+  if (tasks.truncated) truncated.push("tasks");
+  if (posts.truncated) truncated.push("posts");
+  return {
+    truncated,
+    state: {
+      version: 1,
+      theme: "system",
+      currentUserId,
+      users,
+      labels: labels.docs.map((d) => toRecord(d) as Label),
+      projects: projects.docs.map((d) => toRecord(d) as Project).sort(byCreatedAtDesc),
+      tasks: tasks.docs.map((d) => toRecord(d) as Task).sort(byCreatedAtDesc),
+      posts: posts.docs.map((d) => toRecord(d) as Post).sort(byCreatedAtDesc),
+    },
+  };
+}
+
 // ── Diff writer ─────────────────────────────────────────────────────────────
 
 /** Structural equality that treats an `undefined` property as absent (Convex strips them). */
@@ -249,8 +336,12 @@ export function same(a: unknown, b: unknown): boolean {
   return true;
 }
 
-/** Embedded histories are unbounded arrays; keep the newest entries under the cap. */
-export const ACTIVITY_CAP = 4000;
+/**
+ * Activity is system-generated history, so it is trimmed rather than
+ * refused: keep the newest entries. ~100 bytes each, so the cap keeps a
+ * task well inside LIMITS.recordBytes (src/lib/limits.ts) on its own.
+ */
+export const ACTIVITY_CAP = 1000;
 
 function bounded<T extends Table>(table: T, record: RecordOf<T>): RecordOf<T> {
   if (table === "tasks") {
@@ -265,6 +356,8 @@ function bounded<T extends Table>(table: T, record: RecordOf<T>): RecordOf<T> {
 /**
  * Persist `next` (the replayed collection) against `prev` (what was loaded):
  * insert new ids, replace changed records, delete the ones that vanished.
+ * Every record written must satisfy the cloud size limits
+ * (src/lib/limits.ts); unchanged records are not re-checked.
  * Only the loaded slice is compared, so an op scoped to one task can never
  * delete the others. Inserts check the whole table for an id collision —
  * the seed's ids come from the client.
@@ -290,11 +383,15 @@ export async function writeDiff<T extends Table>(
     const existing = prevById.get(id);
     if (existing) {
       if (!same(toRecord(existing), record)) {
+        const problem = checkRecord(table, record as Label | Project | Task | Post);
+        if (problem) fail("Validation", problem);
         await ctx.db.replace(existing._id, { ...record, workspaceId } as never);
         replaced++;
       }
       continue;
     }
+    const problem = checkRecord(table, record as Label | Project | Task | Post);
+    if (problem) fail("Validation", problem);
     const clash = await findByAppId(ctx, table, workspaceId, id);
     if (clash) fail("Conflict", `A ${table.slice(0, -1)} with id ${id} already exists`);
     await ctx.db.insert(table, { ...record, workspaceId } as never);

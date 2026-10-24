@@ -18,6 +18,11 @@ export function fresh(): T {
   return convexTest(schema);
 }
 
+/** Like fresh(), but with Convex's per-transaction read/write limits enforced (16 MiB, 32,000 documents). */
+export function freshWithLimits(): T {
+  return convexTest({ schema, transactionLimits: true });
+}
+
 export interface Account {
   userId: Id<"users">;
   sessionId: Id<"authSessions">;

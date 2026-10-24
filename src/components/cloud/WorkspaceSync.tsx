@@ -153,7 +153,39 @@ export function WorkspaceSync({ children }: { children: ReactNode }) {
       </CloudFrame>
     );
   }
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      {view.truncated.length > 0 && <TruncatedNotice collections={view.truncated} />}
+    </>
+  );
+}
+
+const COLLECTION_NAMES: Record<string, string> = {
+  labels: "labels",
+  projects: "projects",
+  tasks: "issues",
+  posts: "posts",
+};
+
+/**
+ * The server returned only part of the workspace because it has outgrown
+ * what one read can carry (convex/lib.ts loadViewBudgeted). Say which parts
+ * and what helps, and keep it visible: exports and counts are partial too.
+ */
+function TruncatedNotice({ collections }: { collections: string[] }) {
+  const names = collections.map((c) => COLLECTION_NAMES[c] ?? c).join(" and ");
+  return (
+    <div
+      role="status"
+      data-testid="truncated-notice"
+      className="fixed bottom-3 left-1/2 -translate-x-1/2 z-40 max-w-xl w-[calc(100%-1.5rem)] border-[1.5px] border-ink bg-accent text-ink px-3 py-2 text-xs shadow-brutal-sm"
+    >
+      <span className="font-mono uppercase tracking-wider text-[10px] font-bold">Workspace too large to load in full · </span>
+      Only the newest {names} are shown, and exports include only what is shown. Archive or delete old {names}, or split
+      the workspace, to bring the rest back.
+    </div>
+  );
 }
 
 const activeKey = (userId: string) => `doodaboo-cloud:${userId}:workspace`;

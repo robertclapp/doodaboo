@@ -123,13 +123,42 @@ or sign-in and every query fail with an opaque error.
 CI runs all of these. Anything that needs a live deployment — the smoke
 steps above — is the owner's, once per environment.
 
+## Size limits
+
+A cloud workspace is shared and is served to every member through one
+reactive query, so records have caps that local mode does not
+(`src/lib/limits.ts`). They are generous for real use — a seed issue is
+~450 bytes:
+
+| Record | Caps |
+| --- | --- |
+| Issue | title 300 characters, description 20,000, 50 labels, 500 comments of up to 5,000 characters |
+| Project | key 12, name 120, description 10,000, 500 members |
+| Post | title 300, hook 1,000, caption 5,000, transcript 30,000, 60 hashtags of up to 100, 500 snapshots |
+| Label | name 60 |
+| Any record | 256 KB as Convex measures it (Convex's own document limit is 1 MiB) |
+| One import | 8 MB in total |
+
+The server checks every record a write produces and refuses an edit that
+would break a cap with a readable message; the browser runs the same check
+before sending, so the message appears immediately. Activity is
+system-generated history, so instead of being refused it is trimmed to the
+newest 1,000 entries per issue.
+
+Convex fails any function that reads more than 16 MiB. `workspace.get`
+therefore reads against a 12 MiB budget and, should a workspace ever outgrow
+it, returns the newest records that fit and names the collections it cut;
+the app shows a notice saying what is hidden (exports are partial too)
+instead of failing to load for everyone. Edits keep working on the full
+data, because writes only read the records they touch.
+
 ## Limits and follow-ups
 
 - A workspace is one reactive query (`workspace.get`): every member
   receives the whole workspace on each change. Fine at this app's scale;
-  splitting into per-collection queries changes nothing in the op protocol.
+  splitting into per-collection queries changes nothing in the op protocol
+  and would lift the read budget above.
 - Comments, activity and snapshots are embedded in their record (as locally).
-  Activity is capped at 4,000 entries per task server-side.
 - Password only. OAuth providers plug into `convex/auth.ts` with their
   secrets on the deployment.
 - Queued edits while offline live in memory; the banner and the

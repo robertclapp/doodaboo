@@ -15,8 +15,9 @@ import {
 } from "./ops";
 import type { CloudBridge, CloudView, ExportPayload } from "./store";
 import { useStore } from "./store";
-import type { ProjectSnapshot } from "./mutations";
-import type { Post, Task } from "./types";
+import type { ProjectSnapshot, WorkspaceState } from "./mutations";
+import type { Label, Post, Project, Task } from "./types";
+import { checkRecord, type RecordKind } from "./limits";
 
 /**
  * The write path of cloud mode.
@@ -80,6 +81,13 @@ export function createCloudBridge(opts: {
       //    anything is sent — the UI gets the same error it would from the
       //    server, just sooner.
       const local = runOp(mirror, op, seededContext(seed, { actorId: actor, trash }));
+      // The server refuses records over the cloud size limits; say so now
+      // rather than letting the optimistic edit appear and then vanish.
+      const problem = firstLimitProblem(mirror, local.state);
+      if (problem) {
+        opts.notify(problem);
+        throw new OpError("Validation", problem);
+      }
       remember(local.deleted);
 
       // 2. The mutation, with the identical op replayed optimistically.
@@ -137,4 +145,22 @@ export function messageOf(err: unknown): string {
     return err.message.replace(/^\[Request ID: [^\]]+\]\s*/, "");
   }
   return "Something went wrong";
+}
+
+/**
+ * Check only the records an op produced or changed: the pure mutations
+ * return untouched records by identity, so anything not `===` to its
+ * counterpart in the mirror is new or edited.
+ */
+function firstLimitProblem(before: WorkspaceState, after: WorkspaceState): string | null {
+  const kinds: RecordKind[] = ["labels", "projects", "tasks", "posts"];
+  for (const kind of kinds) {
+    const prev = new Map((before[kind] as { id: string }[]).map((r) => [r.id, r]));
+    for (const r of after[kind] as (Label | Project | Task | Post)[]) {
+      if (prev.get(r.id) === r) continue;
+      const problem = checkRecord(kind, r);
+      if (problem) return problem;
+    }
+  }
+  return null;
 }

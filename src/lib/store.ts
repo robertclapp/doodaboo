@@ -94,6 +94,8 @@ export interface CloudView {
   name: string;
   role: "owner" | "member";
   state: WorkspaceState;
+  /** Collections the server cut short because the workspace outgrew one read. */
+  truncated: ("labels" | "projects" | "tasks" | "posts")[];
 }
 
 interface StoreState extends WorkspaceState {

@@ -5,8 +5,8 @@ import type { MutationCtx } from "./_generated/server";
 import {
   fail,
   findMembership,
-  FULL_SCOPE,
   loadDocs,
+  loadViewBudgeted,
   loadMembers,
   loadState,
   nowIso,
@@ -30,6 +30,10 @@ import {
 } from "../src/lib/ops";
 import type { ProjectSnapshot, WorkspaceState } from "../src/lib/mutations";
 import type { Post, Project, Task } from "../src/lib/types";
+import { checkRecord, recordBytes, type RecordKind } from "../src/lib/limits";
+
+/** One import (create with content, or replaceContent) must fit in one Convex transaction's writes. */
+const IMPORT_MAX_BYTES = 8 * 1024 * 1024;
 
 /**
  * Workspace functions: the reactive read model (`get`) and the single write
@@ -47,6 +51,8 @@ export interface WorkspaceView {
   name: string;
   role: "owner" | "member";
   state: WorkspaceState;
+  /** Collections cut short because the workspace outgrew one read (see loadViewBudgeted). */
+  truncated: RecordKind[];
 }
 
 /**
@@ -61,8 +67,8 @@ export const get = query({
     const membership = await findMembership(ctx, workspaceId, userId);
     const workspace = await ctx.db.get(workspaceId);
     if (!membership || !workspace) return null;
-    const { state } = await loadState(ctx, workspaceId, userId, FULL_SCOPE);
-    return { id: workspaceId, name: workspace.name, role: membership.role, state };
+    const { state, truncated } = await loadViewBudgeted(ctx, workspaceId, userId);
+    return { id: workspaceId, name: workspace.name, role: membership.role, state, truncated };
   },
 });
 
@@ -221,6 +227,24 @@ function checkContent(content: Content) {
   const projectIds = new Set(content.projects.map((p) => p.id));
   for (const t of content.tasks) {
     if (!projectIds.has(t.projectId)) fail("Validation", `Task ${t.id} references unknown project ${t.projectId}`);
+  }
+  let total = 0;
+  const each = <R extends { id: string }>(kind: RecordKind, records: R[]) => {
+    for (const r of records) {
+      const problem = checkRecord(kind, r as never);
+      if (problem) fail("Validation", `${problem} (${r.id})`);
+      total += recordBytes(r);
+    }
+  };
+  each("labels", content.labels);
+  each("projects", content.projects);
+  each("tasks", content.tasks);
+  each("posts", content.posts);
+  if (total > IMPORT_MAX_BYTES) {
+    fail(
+      "Validation",
+      `This import is ${(total / 1024 / 1024).toFixed(1)} MB; one import can be at most ${IMPORT_MAX_BYTES / 1024 / 1024} MB. Split it, or remove old posts and issues first.`,
+    );
   }
 }
 
