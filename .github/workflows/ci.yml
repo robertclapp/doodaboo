@@ -68,6 +68,27 @@ jobs:
           path: out/**/*.html
           retention-days: 7
 
+      # The check that matters on a developer machine: `npx convex dev`
+      # leaves NEXT_PUBLIC_CONVEX_URL in .env.local, and a desktop/mobile
+      # build there must still come out local-first. build:tauri fails if
+      # the bundle references the URL; the grep is an independent check.
+      - name: Tauri export stays local-first with a .env.local present
+        run: |
+          trap 'rm -f .env.local' EXIT
+          printf 'NEXT_PUBLIC_CONVEX_URL=https://example-456.convex.cloud\n' > .env.local
+          npm run build:tauri
+          if grep -rq "example-456.convex.cloud" out/_next/static; then
+            echo "local-first bundle references the .env.local deployment" >&2
+            exit 1
+          fi
+
+      # convex/_generated is committed (the repo must typecheck without a
+      # deployment); regenerate it and fail on drift.
+      - name: Generated Convex types are up to date
+        run: |
+          npm run convex:codegen:offline
+          git diff --exit-code -- convex/_generated
+
       # The cloud code path is tree-shaken out of a local-first build, so
       # compile it too: a web build and a cloud Tauri bundle against a
       # placeholder deployment URL (nothing connects at build time).
@@ -327,10 +348,12 @@ jobs:
           E2E_TARGET: cloud-offline
         run: npm run e2e
 
-      - name: Upload Playwright report
-        if: always()
+      - name: Upload test results
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-cloud-offline
-          path: playwright-report/
+          name: playwright-test-results-cloud-offline
+          path: |
+            test-results/
+            playwright-results.json
           retention-days: 7

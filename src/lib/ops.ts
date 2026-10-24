@@ -190,7 +190,7 @@ export function seededContext(
 
 export class OpError extends Error {
   constructor(
-    public readonly code: "NotFound" | "Validation",
+    public readonly code: "NotFound" | "Validation" | "Forbidden",
     message: string,
   ) {
     super(message);

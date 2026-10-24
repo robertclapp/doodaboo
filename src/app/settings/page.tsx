@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/Button";
 import { useStore } from "@/lib/store";
 import { Theme } from "@/lib/store";
 import { useConfirm, useToast } from "@/components/ToastProvider";
+import { cloud as cloudConfig, isCloudBuild, localOverride, setLocalOverride } from "@/lib/backend";
 
 // Cloud mode: account, workspace membership, import-to-cloud and the
 // device-level mode switch live in a chunk only cloud builds download.
@@ -179,6 +180,7 @@ export default function SettingsPage() {
           <SettingsCloud />
         ) : (
           <>
+            <CloudModeSection />
             <section className="col-span-12 lg:col-span-6 border-[1.5px] border-ink bg-paper">
               <Header>Import</Header>
               <div className="p-4 space-y-3">
@@ -304,5 +306,50 @@ function Stat({ label, value }: { label: string; value: number }) {
         {value}
       </div>
     </div>
+  );
+}
+
+/**
+ * Local-mode Settings on a build that knows about the cloud: either this
+ * device chose "Work locally" (offer the way back), or the configured
+ * deployment URL was rejected at boot (say why, so the operator can fix it).
+ * Renders nothing on a plain local-first build.
+ */
+function CloudModeSection() {
+  if (cloudConfig.error) {
+    return (
+      <section className="col-span-12 border-[1.5px] border-ink bg-paper" data-testid="cloud-config-error">
+        <Header>Cloud</Header>
+        <div className="p-4 space-y-2 text-sm">
+          <p className="font-semibold">This build was given a deployment URL it cannot use, so it runs local-first.</p>
+          <p className="font-mono text-xs text-ink/70 break-all">{cloudConfig.error}</p>
+          <p className="text-xs text-ink/60">Fix NEXT_PUBLIC_CONVEX_URL and rebuild. See docs/cloud.md.</p>
+        </div>
+      </section>
+    );
+  }
+  if (!isCloudBuild() || !localOverride()) return null;
+  return (
+    <section className="col-span-12 border-[1.5px] border-ink bg-paper" data-testid="cloud-mode-local">
+      <Header>Cloud</Header>
+      <div className="p-4 flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <div className="text-sm font-semibold">This device is working locally</div>
+          <div className="text-xs text-ink/60">
+            You chose to use this device&apos;s own workspace instead of the cloud. Nothing here is uploaded when you
+            switch back.
+          </div>
+        </div>
+        <Button
+          variant="accent"
+          onClick={() => {
+            setLocalOverride(false);
+            window.location.replace(window.location.href);
+          }}
+        >
+          Use the cloud workspace again
+        </Button>
+      </div>
+    </section>
   );
 }

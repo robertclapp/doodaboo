@@ -14,7 +14,8 @@ same pages, components and routes serve both modes.
   ids they have locally. Auth is [Convex Auth](https://labs.convex.dev/auth)
   with an email + password provider (12–128 character passwords, normalized
   emails, sign-up refused for an existing address so it cannot be used to
-  guess passwords).
+  guess passwords, and one "Wrong email or password" answer for an unknown
+  email and a wrong password alike).
 - **One business-rules implementation** — every edit is an *op*
   (`src/lib/ops.ts`) naming one of the pure mutations in
   `src/lib/mutations.ts`. The browser applies the op optimistically and the
@@ -22,18 +23,35 @@ same pages, components and routes serve both modes.
   the actor and a client-drawn seed for ids and timestamps, so both sides
   produce the same record and navigating to a just-created id is safe.
   Deletes go to a server-side trash (7 days) so "Undo" restores the server's
-  copy, never a client-supplied one.
+  copy, never a client-supplied one. The trash holds one row per record (a
+  deleted project's issues each get their own, grouped under the project),
+  and while a row exists its id is reserved, so nothing new can take it and
+  turn a later Undo into a silent no-op. An issue whose project was deleted
+  comes back with the project, not on its own.
+- **Concurrent edits** — a post's content and context travel as the
+  changed sub-fields, and a task's labels and a project's members as
+  additions and removals, merged into the server's current record. Two
+  people editing different parts of the same record both keep their change;
+  the same field is last-writer-wins.
 - **Authorization** — every function re-reads membership; roles are never
   in the token. Destructive ops (deleting a project, removing a label,
-  replacing all content, deleting the workspace) are owner-only.
+  replacing all content, renaming or deleting the workspace) are owner-only,
+  and members do not see those controls. A cloud build never writes to its
+  in-memory mirror without a live connection to the workspace: a write is
+  refused rather than allowed to vanish on the next sync.
 - **The local vault is never touched** — a cloud session persists only the
   theme (under `doodaboo-cloud-prefs`); `doodaboo-v1` and the desktop vault
   stay as the last local session left them, so a device can switch back.
 - **No deployment reachable?** The connection banner says so after a few
   seconds, counts queued edits (Convex holds them in memory until the socket
-  returns — a reload loses them), and offers *Work locally on this device*,
-  which sets `localStorage["doodaboo-mode"] = "local"` and reloads into
-  local mode. Settings → Cloud has the same switch, and the way back.
+  returns — a reload loses them), and offers *Work locally on this device*
+  (after a confirmation), which sets `localStorage["doodaboo-mode"] =
+  "local"` and reloads into local mode. Settings → Cloud has the same
+  switch; while the device works locally, Settings shows *Use the cloud
+  workspace again*, and an invite link offers to switch back and open it.
+- **Signing out offline** — the server is told when it can be; if it
+  cannot be reached within a few seconds the device forgets its session
+  locally, so a shared device always gets back to the sign-in screen.
 
 ## Set up a deployment (owner checklist)
 
@@ -52,7 +70,10 @@ Local development:
 4. `npm run dev` and sign up. The first account creates its workspace from
    the picker; *Upload this device's local workspace* copies what local mode
    held on that device (your local user becomes you; other local members'
-   assignments are dropped, history is kept).
+   assignments are dropped; their comments and activity are kept but shown
+   as from a former member — an import can never attribute history to a
+   real account). Records are cleaned of fields the cloud does not store
+   (vaults edited through the HTTP API can carry some) before upload.
 
 Production:
 
@@ -70,9 +91,15 @@ Production:
    browser, make an edit on each side and watch it appear on the other.
 
 Desktop and mobile bundles are local-first by default. `npm run build:tauri`
-drops `NEXT_PUBLIC_CONVEX_URL` from the build environment and refuses a
-bundle that references a deployment; to ship a cloud-connected app run it
-with `DOODABOO_TAURI_CLOUD=1` and the URL set. Sign-in from the Tauri origin
+works out the URL Next would inline (environment and `.env` files, so the
+`.env.local` that `npx convex dev` writes counts), builds with it pinned to
+empty, and refuses a bundle that still references it; to ship a
+cloud-connected app run it with `DOODABOO_TAURI_CLOUD=1`. A cloud desktop or
+mobile app cannot make browser links from its own `tauri://` origin: set
+`NEXT_PUBLIC_SITE_URL` to the public web app when building it and invites
+are shared as links to that site; without it they are shared as invite
+codes, which the recipient pastes into *Join with an invite* on their
+workspace picker. Sign-in from the Tauri origin
 (`tauri://localhost` on macOS/iOS, `http://tauri.localhost` on Windows/
 Android) is an HTTP POST to the deployment; confirm sign-up works in the
 webview on each platform before releasing.
@@ -81,20 +108,28 @@ webview on each platform before releasing.
 
 | Variable | Where | Purpose |
 | --- | --- | --- |
-| `NEXT_PUBLIC_CONVEX_URL` | Next build (web host, or `DOODABOO_TAURI_CLOUD=1` Tauri build) | The deployment URL (`https://<slug>.convex.cloud`). Unset → local-first. A malformed value or a `.convex.site` URL is rejected at boot: the app stays local-first and Settings → Cloud shows why. |
+| `NEXT_PUBLIC_CONVEX_URL` | Next build (web host, or `DOODABOO_TAURI_CLOUD=1` Tauri build) | The deployment URL (`https://<slug>.convex.cloud`). Unset → local-first. A malformed value or a `.convex.site` URL fails `next build` (and `next dev`) with an explanation. |
+| `NEXT_PUBLIC_SITE_URL` | Next build | The public web app's URL. Used for metadata, and as the origin of invite links made from a cloud desktop/mobile app. |
 | `CONVEX_DEPLOYMENT` | `.env.local` (dev only) | Which dev deployment `npx convex dev` targets. |
 | `CONVEX_DEPLOY_KEY` | CI / host secret | Lets `npx convex deploy` push to production. |
 | `JWT_PRIVATE_KEY`, `JWKS`, `SITE_URL` | The Convex deployment (set by `npx @convex-dev/auth`) | Token signing and redirect base. Never part of the Next build. |
 
-Nothing but `NEXT_PUBLIC_CONVEX_URL` is baked into the client.
+Nothing but these two public URLs is baked into the client.
 
 ## What changes in cloud mode
 
 - Team: members are accounts. Owners create **invite links** (single use,
   7 days; whoever opens one while signed in joins — the email on an invite
   is a note, not a check, because password accounts never prove they own
-  their address). Owners can remove members (assignments are cleared),
-  transfer ownership, and revoke invites. Everyone edits their own profile.
+  their address). The token is in the link's `#fragment`, so it never
+  reaches the web host's request logs, and it is removed from the address
+  bar whatever the recipient chooses. A link works only while the person
+  who made it is still an owner: removing someone, their leaving, or their
+  handing over ownership revokes the links they made, and the pending list
+  shows who made each one. Someone who is already a member and opens a link
+  is just taken to the workspace; the link stays unused for its recipient.
+  Owners can remove members (assignments are cleared), transfer ownership,
+  and revoke invites. Everyone edits their own profile.
 - Settings: the Import and local Danger-zone actions become *Replace
   content from a JSON export* (owner), *Leave workspace*, *Delete
   workspace* (owner), and the device-level *Work locally* switch.
@@ -116,9 +151,10 @@ or sign-in and every query fail with an opaque error.
 | --- | --- |
 | Backend functions, real auth flow, membership, op replay | `npm run test:convex` (convex-test + vitest, RSA key generated per run) |
 | Op protocol, seeded determinism, read scopes | `npm test` (`src/lib/ops.test.ts`) |
-| Cloud shell without a server: gate, untouched vault, banner, escape hatch | `NEXT_PUBLIC_CONVEX_URL=http://127.0.0.1:9 npm run build && E2E_TARGET=cloud-offline npm run e2e` |
+| Cloud shell without a server: gate, untouched vault, banner, escape hatch and the way back | `NEXT_PUBLIC_CONVEX_URL=http://127.0.0.1:9 npm run build && E2E_TARGET=cloud-offline npm run e2e` |
+| Tauri bundles stay local-first with a `.env.local` present | `npm run build:tauri` with a `.env.local` holding a URL (CI does exactly this) |
 | The cloud path compiles | `NEXT_PUBLIC_CONVEX_URL=https://example-123.convex.cloud npm run build` |
-| Generated types without a deployment | `npm run convex:codegen:offline` (writes `convex/_generated/` from the CLI's own templates; `npx convex dev` rewrites it in canonical form) |
+| Generated types without a deployment, and no drift | `npm run convex:codegen:offline && git diff --exit-code -- convex/_generated` (writes `convex/_generated/` from the CLI's own templates; `npx convex dev` rewrites it in canonical form) |
 
 CI runs all of these. Anything that needs a live deployment — the smoke
 steps above — is the owner's, once per environment.

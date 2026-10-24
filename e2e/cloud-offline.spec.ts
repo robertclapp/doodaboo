@@ -66,17 +66,37 @@ test.describe("cloud mode, deployment unreachable", () => {
     // Nothing a cloud session does may touch the local vault.
     expect(await page.evaluate(() => window.localStorage.getItem("doodaboo-v1"))).toBe(sentinel);
 
-    // Escape hatch: work locally on this device.
+    // Escape hatch: work locally on this device (asks first).
     await page.getByRole("button", { name: /Work locally on this device/i }).click();
+    await page.getByRole("dialog").getByRole("button", { name: /^Work locally$/i }).click();
     await expect(page.getByRole("complementary", { name: /Primary navigation/i })).toBeVisible();
     await expect(page.getByRole("complementary", { name: /Primary navigation/i }).getByText("Sentinel Project")).toBeVisible();
     // Local mode persists to the vault key again; the sentinel's theme wins
     // (the bootstrap reads it before React mounts).
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     expect(await page.evaluate(() => window.localStorage.getItem("doodaboo-mode"))).toBe("local");
-    // And the cloud-only pages explain themselves rather than breaking.
-    await page.goto("/join?token=abc");
+    // The cloud-only pages explain themselves rather than breaking, and never echo the token.
+    await page.goto("/join#token=AbCdEfGhIjKlMnOpQrStUvWxYz012345");
     await expect(page.getByText(/set to work locally/i)).toBeVisible();
+    await expect(page.getByText("AbCdEfGhIjKlMnOpQrStUvWxYz012345")).toHaveCount(0);
+
+    // And there is a way back: Settings → Cloud returns the device to the cloud sign-in.
+    await page.goto("/settings");
+    await page.getByRole("button", { name: /Use the cloud workspace again/i }).click();
+    await expect(page.getByRole("form", { name: /Sign in/i })).toBeVisible();
+    expect(await page.evaluate(() => window.localStorage.getItem("doodaboo-mode"))).toBeNull();
+    // Still nothing written to the local vault by the cloud side.
+    const vault = await page.evaluate(() => window.localStorage.getItem("doodaboo-v1"));
+    expect(JSON.parse(vault!).state.projects[0].name).toBe("Sentinel Project");
+  });
+
+  test("an invite link opened while signed out shows the sign-in gate and never echoes the token", async ({ page }) => {
+    await page.goto("/join#token=AbCdEfGhIjKlMnOpQrStUvWxYz012345");
+    await page.evaluate(() => window.localStorage.clear());
+    await page.reload();
+    // Unauthenticated: the gate wins over the invite, and the token is not shown.
+    await expect(page.getByRole("form", { name: /Sign in/i })).toBeVisible();
+    await expect(page.getByText("AbCdEfGhIjKlMnOpQrStUvWxYz012345")).toHaveCount(0);
   });
 
   test("the sign-up form enforces the password policy before anything is sent", async ({ page }) => {

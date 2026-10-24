@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useConvexConnectionState } from "convex/react";
 import { cloudHost, setLocalOverride } from "@/lib/backend";
+import { useConfirm } from "@/components/ToastProvider";
 // The decision itself is pure and unit-tested: src/lib/connection-status.ts.
 import { connectionStatus } from "@/lib/connection-status";
 
@@ -14,6 +15,7 @@ import { connectionStatus } from "@/lib/connection-status";
  */
 export function ConnectionBanner({ compact }: { compact?: boolean }) {
   const state = useConvexConnectionState();
+  const confirm = useConfirm();
   const [mountedAt] = useState(() => Date.now());
   const [, tick] = useState(0);
   useEffect(() => {
@@ -31,7 +33,14 @@ export function ConnectionBanner({ compact }: { compact?: boolean }) {
   );
   if (status.kind === "ok") return null;
 
-  const goLocal = () => {
+  const goLocal = async () => {
+    const ok = await confirm({
+      title: "Work locally on this device",
+      message:
+        "This device will use its own local workspace instead of the cloud. You can switch back any time in Settings → Cloud; nothing in the cloud workspace changes.",
+      confirmLabel: "Work locally",
+    });
+    if (!ok) return;
     setLocalOverride(true);
     window.location.href = "/";
   };
@@ -60,7 +69,7 @@ export function ConnectionBanner({ compact }: { compact?: boolean }) {
       {!compact && (
         <div className="text-xs">
           Edits are kept in memory until the connection returns; a reload loses them.{" "}
-          <button type="button" onClick={goLocal} className="underline font-semibold">
+          <button type="button" onClick={() => void goLocal()} className="underline font-semibold">
             Work locally on this device instead
           </button>
           .

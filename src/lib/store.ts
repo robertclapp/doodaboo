@@ -186,15 +186,22 @@ function extract(s: StoreState): WorkspaceState {
  * Route a write: through the cloud bridge when a workspace is live, else
  * through the local pure mutation. The bridge returns the same result type
  * the local path does, so callers never know which one ran.
+ *
+ * A cloud build never falls back to the local path: with no bridge (the
+ * workspace is still loading, or being switched) the write is refused, so
+ * an edit can never land only in the in-memory mirror and vanish on the
+ * next sync.
  */
 function route<T>(get: () => StoreState, op: Op, local: () => T): T {
   const bridge = get().cloud;
-  return bridge ? (bridge.apply(op) as T) : local();
+  if (bridge) return bridge.apply(op) as T;
+  if (cloudMode) throw new Error("Not connected to the workspace yet — try again in a moment");
+  return local();
 }
 
 /** Actions that only make sense for a device-local workspace. */
-function assertLocal(get: () => StoreState, what: string): void {
-  if (get().cloud) {
+function assertLocal(_get: () => StoreState, what: string): void {
+  if (cloudMode) {
     throw new Error(`${what} is not available in cloud mode; manage the workspace from Settings → Cloud`);
   }
 }

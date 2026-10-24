@@ -69,10 +69,12 @@ export — which has a stricter contract than the web build:
   `api/` directory was built, or if a parked path did not come back.
 
 The bundle is **local-first by default** even on a machine that has run
-the cloud setup: `build:tauri` drops `NEXT_PUBLIC_CONVEX_URL` from the
-build environment and fails if the output still references a deployment.
+the cloud setup: `build:tauri` works out the deployment URL Next would
+inline (including the `.env.local` that `npx convex dev` writes), builds
+with it pinned to empty, and fails if the output still references it.
 To ship a cloud-connected desktop or mobile app, build with
-`DOODABOO_TAURI_CLOUD=1` and the URL set (see [docs/cloud.md](cloud.md)).
+`DOODABOO_TAURI_CLOUD=1` (and `NEXT_PUBLIC_SITE_URL`, so invites can be
+shared as web links — see [docs/cloud.md](cloud.md)).
 Inside the webview, sign-in tokens live in the WebView profile's
 localStorage.
 

@@ -86,7 +86,7 @@ export default function SettingsCloud() {
     const ok = await confirm({
       title: "Work locally on this device",
       message:
-        "This device will use its own local workspace instead of the cloud until you switch back here. Nothing in the cloud workspace is changed.",
+        "This device will use its own local workspace instead of the cloud. Switch back any time in Settings → Cloud; nothing in the cloud workspace changes.",
       confirmLabel: "Use local workspace",
     });
     if (!ok) return;

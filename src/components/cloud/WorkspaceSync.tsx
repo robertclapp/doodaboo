@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useConvex, useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { api } from "@convex/_generated/api";
@@ -14,16 +14,28 @@ import { CloudFrame } from "./CloudFrame";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { WorkspacePicker } from "./WorkspacePicker";
 import { JoinInvite } from "./JoinInvite";
+import { inviteTokenFromLocation } from "./invite-links";
+
+/** How long sign-out may wait for the server before the device signs itself out. */
+const SIGN_OUT_TIMEOUT_MS = 5_000;
+/** The ConvexAuthProvider storage namespace (CloudTree.tsx), as the provider escapes it. */
+const AUTH_NAMESPACE = "doodaboo";
 
 /**
  * Keeps the store mirroring one cloud workspace for the signed-in account.
  *
- * State machine (per account):
+ * The rule that keeps writes safe: whenever a valid workspace view is
+ * present, the store holds a bridge for exactly that workspace, installed
+ * before the view is ingested (the app renders only once `hydrated`). It is
+ * derived from the current state on every pass, not from what changed, so
+ * no navigation can leave the app rendered without a write path.
+ *
  *   - no valid active workspace → the picker;
- *   - active workspace, query pending → loading;
- *   - result arrived → `ingestCloudView` flips `hydrated`, the app renders;
- *   - result became null (membership revoked, workspace deleted) → mirror
- *     cleared, back to the picker;
+ *   - "Switch workspace" → the picker over an intact mirror; Back or the
+ *     current workspace returns to it unchanged, another workspace clears
+ *     the mirror and loads that one;
+ *   - the active workspace disappears from the account's list (removed,
+ *     deleted) → mirror cleared, a toast says why, back to the picker;
  *   - account changed or signed out → mirror cleared first, always.
  *
  * The active workspace id is remembered per account so two people sharing
@@ -33,19 +45,26 @@ export function WorkspaceSync({ children }: { children: ReactNode }) {
   const client = useConvex();
   const { signOut } = useAuthActions();
   const toast = useToast();
+  const router = useRouter();
   const pathname = usePathname();
   const me = useQuery(api.users.me, {});
   const mine = useQuery(api.workspace.listMine, {});
   const userId = me?.id ?? null;
+  const email = me?.email ?? null;
   const hydrated = useStore((s) => s.hydrated);
 
   const [active, setActive] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [pastedToken, setPastedToken] = useState<string | null>(null);
+  const everValid = useRef<string | null>(null);
 
   // Account boundary: nothing from a previous account survives.
   useEffect(() => {
     clearCloudWorkspace();
     setPicking(false);
+    setPastedToken(null);
+    everValid.current = null;
     setActive(userId ? readActive(userId) : null);
   }, [userId]);
 
@@ -58,61 +77,100 @@ export function WorkspaceSync({ children }: { children: ReactNode }) {
   const pick = useCallback(
     (id: string) => {
       if (!userId) return;
+      setPicking(false);
+      if (id === active) return; // back to the workspace already mirrored
       clearCloudWorkspace();
       writeActive(userId, id);
       setActive(id);
-      setPicking(false);
     },
-    [userId],
+    [userId, active],
   );
 
   const handleSignOut = useCallback(async () => {
+    setSigningOut(true);
+    // The provider clears its tokens only after the server acknowledges,
+    // and offline that never comes. Sign the device out regardless.
+    const done = await Promise.race([
+      signOut().then(() => true, () => false),
+      new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), SIGN_OUT_TIMEOUT_MS)),
+    ]);
     clearCloudWorkspace();
-    await signOut();
+    if (!done) {
+      forgetLocalSession();
+      window.location.replace(routes.home);
+    }
   }, [signOut]);
 
-  // The bridge is the store's write path; rebuilt only when its identity
-  // inputs change, not on every reactive result.
-  const viewId = view?.id ?? null;
-  const viewRole = view?.role ?? null;
-  const viewName = view?.name ?? null;
-  const email = me?.email ?? null;
+  // Bridge + mirror, derived from the current state (see the rule above).
   useEffect(() => {
-    if (!valid || !viewId || !viewRole || !viewName || !userId) return;
-    useStore.setState({
-      cloud: createCloudBridge({
-        client,
-        workspaceId: viewId as Id<"workspaces">,
-        workspaceName: viewName,
-        role: viewRole,
-        account: { email, userId },
-        notify: (message) => toast.error(message),
-        switchWorkspace: () => {
-          clearCloudWorkspace();
-          setPicking(true);
-        },
-        signOut: handleSignOut,
-      }),
-    });
-  }, [client, valid, viewId, viewRole, viewName, userId, email, toast, handleSignOut]);
-
-  // Mirror every result; a null result means access is gone.
-  useEffect(() => {
-    if (!valid) return;
-    if (view === null) {
-      if (userId) clearActive(userId);
-      clearCloudWorkspace();
-      setActive(null);
-      toast.error("You no longer have access to that workspace");
-      return;
+    if (!valid || !userId || view === undefined) return;
+    if (view === null) return; // handled with revocation below
+    const current = useStore.getState().cloud;
+    if (
+      !current ||
+      current.workspaceId !== view.id ||
+      current.role !== view.role ||
+      current.workspaceName !== view.name ||
+      current.account.email !== email
+    ) {
+      useStore.setState({
+        cloud: createCloudBridge({
+          client,
+          workspaceId: view.id as Id<"workspaces">,
+          workspaceName: view.name,
+          role: view.role,
+          account: { email, userId },
+          notify: (message) => toast.error(message),
+          switchWorkspace: () => setPicking(true),
+          signOut: handleSignOut,
+        }),
+      });
     }
-    if (view) ingestCloudView(view);
-  }, [valid, view, userId, toast]);
+    ingestCloudView(view);
+    everValid.current = view.id;
+  }, [client, valid, view, userId, email, toast, handleSignOut, hydrated]);
+
+  // Revocation: the active workspace is gone from the account's list (or
+  // the server says no access). Toast only if it was open in this session;
+  // a stale remembered id from a past session clears silently.
+  useEffect(() => {
+    if (!userId || !active || mine === undefined) return;
+    const listed = mine.some((w) => w.id === active);
+    if (listed && view !== null) return;
+    clearActive(userId);
+    const lost = everValid.current === active;
+    everValid.current = null;
+    clearCloudWorkspace();
+    setActive(null);
+    if (lost) toast.error("You no longer have access to that workspace");
+  }, [userId, active, mine, view, toast]);
+
+  const leaveJoin = useCallback(
+    (id: string | null) => {
+      setPastedToken(null);
+      if (id) {
+        if (userId) writeActive(userId, id);
+        pick(id);
+      }
+      // A real navigation (not history.replaceState): the /join page must
+      // unmount, and the token must leave the address bar and history.
+      if (pathname === routes.join) router.replace(routes.home);
+    },
+    [pick, pathname, router, userId],
+  );
+
+  if (signingOut) {
+    return (
+      <CloudFrame title="Signing out">
+        <p className="text-sm text-ink/70">Signing you out…</p>
+      </CloudFrame>
+    );
+  }
 
   // Invite links are redeemed before anything else is decided.
-  const token = pathname === routes.join ? currentToken() : null;
+  const token = pastedToken ?? (pathname === routes.join ? inviteTokenFromLocation() : null);
   if (token && userId) {
-    return <JoinInvite token={token} onJoined={pick} onSignOut={handleSignOut} />;
+    return <JoinInvite token={token} onDone={leaveJoin} onSignOut={handleSignOut} />;
   }
 
   if (me === undefined || mine === undefined) {
@@ -140,6 +198,7 @@ export function WorkspaceSync({ children }: { children: ReactNode }) {
         workspaces={mine}
         current={valid ? active : null}
         onPick={pick}
+        onRedeem={setPastedToken}
         onSignOut={handleSignOut}
         onCancel={valid ? () => setPicking(false) : undefined}
       />
@@ -150,6 +209,9 @@ export function WorkspaceSync({ children }: { children: ReactNode }) {
       <CloudFrame title="Loading workspace">
         <p className="text-sm text-ink/70">Syncing…</p>
         <ConnectionBanner />
+        <button type="button" className="underline text-xs text-ink/60" onClick={() => setPicking(true)}>
+          Choose another workspace
+        </button>
       </CloudFrame>
     );
   }
@@ -159,6 +221,20 @@ export function WorkspaceSync({ children }: { children: ReactNode }) {
       {view.truncated.length > 0 && <TruncatedNotice collections={view.truncated} />}
     </>
   );
+}
+
+/** Drop this device's sign-in tokens (used when the server cannot be told). */
+function forgetLocalSession(): void {
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (key && key.startsWith("__convexAuth") && key.endsWith(`_${AUTH_NAMESPACE}`)) doomed.push(key);
+    }
+    for (const key of doomed) window.localStorage.removeItem(key);
+  } catch {
+    // Storage unavailable: nothing persisted to forget.
+  }
 }
 
 const COLLECTION_NAMES: Record<string, string> = {
@@ -212,7 +288,3 @@ function clearActive(userId: string): void {
   }
 }
 
-function currentToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return new URLSearchParams(window.location.search).get("token");
-}

@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { messageOf } from "@/lib/cloud-bridge";
 import { hasContent, readLocalWorkspace } from "@/lib/local-vault";
+import { normalizeContent } from "@/lib/normalize-content";
+import { parseInviteInput } from "./invite-links";
 import type { WorkspaceState } from "@/lib/mutations";
 import { CloudFrame } from "./CloudFrame";
 import { ConnectionBanner } from "./ConnectionBanner";
@@ -22,6 +24,7 @@ export function WorkspacePicker({
   workspaces,
   current,
   onPick,
+  onRedeem,
   onSignOut,
   onCancel,
 }: {
@@ -29,6 +32,8 @@ export function WorkspacePicker({
   workspaces: WorkspaceSummary[];
   current: string | null;
   onPick: (id: string) => void;
+  /** Open the invite screen for a pasted link or code. */
+  onRedeem: (token: string) => void;
   onSignOut: () => Promise<void>;
   onCancel?: () => void;
 }) {
@@ -38,6 +43,8 @@ export function WorkspacePicker({
   const [upload, setUpload] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [inviteText, setInviteText] = useState("");
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   useEffect(() => {
     void readLocalWorkspace().then((ws) => setLocal(hasContent(ws) ? ws : null));
@@ -54,7 +61,8 @@ export function WorkspacePicker({
         name: clean,
         ...(upload && local
           ? {
-              content: { labels: local.labels, projects: local.projects, tasks: local.tasks, posts: local.posts },
+              // The vault may carry stray fields from API edits; send only what the cloud accepts.
+              content: normalizeContent(local),
               fromUserId: local.currentUserId || undefined,
             }
           : {}),
@@ -110,6 +118,36 @@ export function WorkspacePicker({
           You are not in any workspace yet. Create one, or open an invite link a teammate sent you.
         </p>
       )}
+
+      <form
+        className="space-y-2 border-t-[1.5px] border-ink/10 pt-4"
+        aria-label="Join with an invite"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const token = parseInviteInput(inviteText);
+          if (!token) return setInviteError("That does not look like an invite link or code");
+          setInviteError(null);
+          onRedeem(token);
+        }}
+      >
+        <Label htmlFor="invite-text">Join with an invite</Label>
+        <div className="flex items-center gap-2">
+          <Input
+            id="invite-text"
+            value={inviteText}
+            onChange={(e) => setInviteText(e.target.value)}
+            placeholder="Paste the invite link or code"
+          />
+          <Button type="submit" variant="outline">
+            Continue
+          </Button>
+        </div>
+        {inviteError && (
+          <div role="alert" className="text-xs text-priority-urgent">
+            {inviteError}
+          </div>
+        )}
+      </form>
 
       <form onSubmit={submit} className="space-y-3 border-t-[1.5px] border-ink/10 pt-4" aria-label="Create workspace">
         <div>

@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
-import { isCloudBuild } from "@/lib/backend";
+import { Button } from "@/components/ui/Button";
+import { isCloudBuild, localOverride, setLocalOverride } from "@/lib/backend";
 import { routes } from "@/lib/routes";
 
 /**
@@ -21,28 +21,41 @@ export default function JoinPage() {
 }
 
 function JoinBody() {
-  const token = useSearchParams().get("token");
+  // Read on the client only: the device override lives in localStorage.
+  const [overridden, setOverridden] = useState(false);
+  useEffect(() => setOverridden(localOverride()), []);
   return (
     <>
       <PageHeader kicker="Workspace" title="Invitation" />
       <div className="p-4 max-w-xl space-y-3 text-sm">
-        {isCloudBuild() ? (
-          <p className="text-ink/70">
-            This device is set to work locally. Switch back to the cloud in Settings → Cloud to redeem the
-            invite.
-          </p>
+        {isCloudBuild() && overridden ? (
+          <>
+            <p className="text-ink/70">
+              This device is set to work locally, so it cannot open the invite. Switch back to the cloud to
+              redeem it.
+            </p>
+            <Button
+              variant="accent"
+              onClick={() => {
+                setLocalOverride(false);
+                // Same URL, so the invite (in the #fragment) survives the reload.
+                window.location.replace(window.location.href);
+              }}
+            >
+              Use the cloud and open the invite
+            </Button>
+          </>
         ) : (
           <p className="text-ink/70">
-            Invite links join a shared cloud workspace, and this build runs local-first on this device
-            only. Open the link in the cloud edition of Doodaboo to join.
+            Invite links join a shared cloud workspace, and this build runs local-first on this device only. Open
+            the link in the cloud edition of Doodaboo to join.
           </p>
         )}
-        {token && (
-          <p className="font-mono text-[11px] text-ink/50 break-all">token: {token}</p>
-        )}
-        <Link href={routes.home} className="underline">
-          Back to the dashboard
-        </Link>
+        <div>
+          <Link href={routes.home} className="underline">
+            Back to the dashboard
+          </Link>
+        </div>
       </div>
     </>
   );

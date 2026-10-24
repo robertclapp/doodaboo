@@ -7,12 +7,15 @@ import type { Id } from "@convex/_generated/dataModel";
 import {
   drawSeed,
   OpError,
+  OWNER_ONLY_OPS,
   runOp,
   seededContext,
   type Deleted,
   type Op,
+  type OpResult,
   type TrashLookup,
 } from "./ops";
+import { normalizeContent } from "./normalize-content";
 import type { CloudBridge, CloudView, ExportPayload } from "./store";
 import { useStore } from "./store";
 import type { ProjectSnapshot, WorkspaceState } from "./mutations";
@@ -37,6 +40,28 @@ import { checkRecord, type RecordKind } from "./limits";
  * Deletes remember what they removed so a later restore op can be applied
  * optimistically; the server restores from its own trash table.
  */
+/**
+ * Records deleted in this session, per workspace, so a restore can be shown
+ * optimistically. Kept outside the bridge: the bridge is rebuilt when the
+ * workspace is renamed or the user's role changes, and an Undo clicked
+ * after that must still work. The server's trash is authoritative either
+ * way; this is only the preview.
+ */
+const clientTrash = new Map<
+  string,
+  { project: Map<string, ProjectSnapshot>; task: Map<string, Task>; post: Map<string, Post> }
+>();
+function trashFor(workspaceId: string) {
+  let t = clientTrash.get(workspaceId);
+  if (!t) {
+    t = { project: new Map(), task: new Map(), post: new Map() };
+    clientTrash.set(workspaceId, t);
+  }
+  return t;
+}
+
+const RESTORE_OPS = new Set<Op["type"]>(["restoreProject", "restoreTask", "restorePost"]);
+
 export function createCloudBridge(opts: {
   client: ConvexReactClient;
   workspaceId: Id<"workspaces">;
@@ -48,11 +73,7 @@ export function createCloudBridge(opts: {
   signOut: () => Promise<void>;
 }): CloudBridge {
   const { client, workspaceId } = opts;
-  const trashed = {
-    project: new Map<string, ProjectSnapshot>(),
-    task: new Map<string, Task>(),
-    post: new Map<string, Post>(),
-  };
+  const trashed = trashFor(workspaceId);
   const trash: TrashLookup = {
     project: (id) => trashed.project.get(id),
     task: (id) => trashed.task.get(id),
@@ -64,6 +85,10 @@ export function createCloudBridge(opts: {
     else if (d.kind === "task") trashed.task.set(d.snapshot.id, d.snapshot);
     else trashed.post.set(d.snapshot.id, d.snapshot);
   };
+  const refuse = (message: string, code: OpError["code"]): never => {
+    opts.notify(message);
+    throw new OpError(code, message);
+  };
 
   return {
     workspaceId,
@@ -74,21 +99,34 @@ export function createCloudBridge(opts: {
     signOut: opts.signOut,
 
     apply(op: Op): unknown {
+      // The server enforces this too; refusing here means a member never
+      // sees a delete "succeed", offer Undo, and then revert.
+      if (OWNER_ONLY_OPS.has(op.type) && opts.role !== "owner") {
+        refuse("Only a workspace owner can do that", "Forbidden");
+      }
       const seed = drawSeed();
       const mirror = useStore.getState();
       const actor = mirror.currentUserId;
-      // 1. Local result for the caller. A stale target throws here, before
-      //    anything is sent — the UI gets the same error it would from the
-      //    server, just sooner.
-      const local = runOp(mirror, op, seededContext(seed, { actorId: actor, trash }));
-      // The server refuses records over the cloud size limits; say so now
-      // rather than letting the optimistic edit appear and then vanish.
-      const problem = firstLimitProblem(mirror, local.state);
-      if (problem) {
-        opts.notify(problem);
-        throw new OpError("Validation", problem);
+
+      // 1. Local result for the caller. Any failure is reported, then
+      //    thrown, so a caller that expects a record never gets undefined.
+      //    The one exception: a restore whose snapshot this tab does not
+      //    hold (deleted elsewhere, or before a reload) — the server's trash
+      //    has it, so send without a preview.
+      let local: OpResult | null = null;
+      try {
+        local = runOp(mirror, op, seededContext(seed, { actorId: actor, trash }));
+      } catch (err) {
+        const missingPreview = RESTORE_OPS.has(op.type) && err instanceof OpError && err.code === "NotFound";
+        if (!missingPreview) refuse(messageOf(err), err instanceof OpError ? err.code : "Validation");
       }
-      remember(local.deleted);
+      if (local) {
+        // The server refuses records over the cloud size limits; say so now
+        // rather than letting the optimistic edit appear and then vanish.
+        const problem = firstLimitProblem(mirror, local.state);
+        if (problem) refuse(problem, "Validation");
+        remember(local.deleted);
+      }
 
       // 2. The mutation, with the identical op replayed optimistically.
       void client
@@ -103,7 +141,7 @@ export function createCloudBridge(opts: {
                 const r = runOp(current.state, args.op as Op, seededContext(args.seed, { actorId: actor, trash }));
                 store.setQuery(api.workspace.get, { workspaceId }, { ...current, id: workspaceId, state: r.state });
               } catch {
-                // Leave the cached view alone; the server's answer decides.
+                // No preview possible; the server's answer decides.
               }
             },
           },
@@ -112,25 +150,29 @@ export function createCloudBridge(opts: {
           opts.notify(messageOf(err));
         });
 
-      return local.result;
+      return local?.result;
     },
 
     async replaceContent(payload: ExportPayload): Promise<void> {
+      const content = normalizeContent(payload);
       await client.mutation(api.workspace.replaceContent, {
         workspaceId,
-        content: {
-          labels: payload.labels,
-          projects: payload.projects,
-          tasks: payload.tasks,
-          posts: payload.posts ?? [],
-        },
-        fromUserId: payload.currentUserId,
+        content,
+        ...(payload.currentUserId ? { fromUserId: payload.currentUserId } : {}),
       });
     },
   };
 }
 
-/** A readable message for any failure the cloud layer can produce. */
+/**
+ * A readable message for any failure the cloud layer can produce.
+ *
+ * ConvexError data always reaches the client and is the message to show.
+ * Anything else arrives as "[CONVEX M(fn)] [Request ID: …] Server Error
+ * … Called by client" — production redacts the detail — so strip the
+ * transport framing, keep a developer message if one survived, and turn a
+ * bare "Server Error" into a sentence.
+ */
 export function messageOf(err: unknown): string {
   if (err instanceof ConvexError) {
     const data = err.data as { message?: string } | string;
@@ -139,10 +181,17 @@ export function messageOf(err: unknown): string {
   }
   if (err instanceof OpError) return err.message;
   if (err instanceof Error) {
-    // Convex wraps server errors as "[Request ID: …] Server Error: …".
-    const m = /Uncaught (?:ConvexError|Error): (.*?)(?:\n|$)/.exec(err.message);
-    if (m) return m[1];
-    return err.message.replace(/^\[Request ID: [^\]]+\]\s*/, "");
+    const uncaught = /Uncaught (?:ConvexError|Error): (.*?)(?:\n|$)/.exec(err.message);
+    if (uncaught) return uncaught[1];
+    const text = err.message
+      .replace(/^\[CONVEX [^\]]*\]\s*/, "")
+      .replace(/^\[Request ID: [^\]]+\]\s*/, "")
+      .replace(/\s*Called by client\s*$/, "")
+      .trim();
+    if (!text || /^Server Error\b/.test(text)) {
+      return "The server could not complete that. Try again in a moment.";
+    }
+    return text;
   }
   return "Something went wrong";
 }
