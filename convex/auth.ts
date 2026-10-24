@@ -82,13 +82,37 @@ const hardenedPassword = ConvexCredentials<DataModel>({
       return stock.authorize({ ...params, email }, ctx);
     }
     if (flow === "signIn") {
-      return stock.authorize({ ...params, email: normalizeEmail(params.email) }, ctx);
+      const email = normalizeEmail(params.email);
+      try {
+        return await stock.authorize({ ...params, email }, ctx);
+      } catch (err) {
+        throw signInError(err);
+      }
     }
     // Reset / verification flows are not configured (no email provider);
     // the stock implementation rejects them with a clear error.
     return stock.authorize(params, ctx);
   },
 });
+
+/**
+ * The stock provider signals a failed sign-in with plain Errors carrying a
+ * code ("InvalidAccountId", "InvalidSecret", "TooManyFailedAttempts",
+ * "Invalid credentials"). Production deployments redact plain Errors, so the
+ * user would see a raw "Server Error"; ConvexError data always reaches the
+ * client. An unknown email and a wrong password get the same message.
+ */
+export function signInError(err: unknown): unknown {
+  if (err instanceof ConvexError) return err;
+  const code = err instanceof Error ? err.message : String(err);
+  if (code.includes("TooManyFailedAttempts")) {
+    return new ConvexError("Too many failed sign-in attempts. Wait a while and try again.");
+  }
+  if (code.includes("InvalidAccountId") || code.includes("InvalidSecret") || code.includes("Invalid credentials")) {
+    return new ConvexError("Wrong email or password");
+  }
+  return err;
+}
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
   providers: [hardenedPassword],

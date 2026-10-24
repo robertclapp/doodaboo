@@ -6,7 +6,7 @@ import { createTauriStorage, isTauri } from "./tauri-storage";
 import { demoPostsEnabled } from "./seed";
 import { CLOUD_PREFS_KEY, isCloud } from "./backend";
 import { deepEqual } from "./deep-equal";
-import { Op, toWirePatch } from "./ops";
+import { Op, toCloudUpdate } from "./ops";
 import {
   Comment,
   EngagementSnapshot,
@@ -292,7 +292,7 @@ export const useStore = create<StoreState>()(
           applyAnd(set, get, (s) => createProjectAdapter(s, data)),
         ),
       updateProject: (id, patch) =>
-        route(get, { type: "updateProject", id, ...toWirePatch(patch) }, () =>
+        route(get, toCloudUpdate("project", id, patch, get().projects.find((p) => p.id === id)), () =>
           apply(set, get, (s) => updateProjectMut(s, id, patch)),
         ),
       deleteProject: (id) =>
@@ -309,7 +309,7 @@ export const useStore = create<StoreState>()(
           applyAnd(set, get, (s) => createTaskAdapter(s, data)),
         ),
       updateTask: (id, patch) =>
-        route(get, { type: "updateTask", id, ...toWirePatch(patch) }, () =>
+        route(get, toCloudUpdate("task", id, patch, get().tasks.find((t) => t.id === id)), () =>
           apply(set, get, (s) => updateTaskMut(s, id, patch)),
         ),
       deleteTask: (id) =>
@@ -336,7 +336,7 @@ export const useStore = create<StoreState>()(
           applyAnd(set, get, (s) => createPostAdapter(s, data)),
         ),
       updatePost: (id, patch) =>
-        route(get, { type: "updatePost", id, ...toWirePatch(patch) }, () =>
+        route(get, toCloudUpdate("post", id, patch, get().posts.find((p) => p.id === id)), () =>
           apply(set, get, (s) => updatePostMut(s, id, patch)),
         ),
       deletePost: (id) =>

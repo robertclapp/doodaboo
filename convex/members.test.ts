@@ -43,6 +43,23 @@ describe("sign-up hardening", () => {
     ).rejects.toThrow(/valid email/);
   });
 
+  it("a wrong password and an unknown email get the same readable error", async () => {
+    const t = fresh();
+    await signUp(t, "real@example.com", "correct horse battery");
+    const attempt = async (email: string, password: string) => {
+      try {
+        await t.action(api.auth.signIn, { provider: "password", params: { flow: "signIn", email, password } });
+        return "signed in";
+      } catch (e) {
+        // A ConvexError's data survives production redaction; a plain Error does not.
+        expect(e).toBeInstanceOf(ConvexError);
+        return (e as ConvexError<string>).data;
+      }
+    };
+    expect(await attempt("real@example.com", "wrong password here")).toBe("Wrong email or password");
+    expect(await attempt("nobody@example.com", "whatever password")).toBe("Wrong email or password");
+  });
+
   it("signs in with any casing of the email", async () => {
     const t = fresh();
     await signUp(t, "case@example.com", "correct horse battery");
@@ -77,9 +94,12 @@ describe("invites", () => {
     expect(await as(t, bob).query(api.members.peekInvite, { token })).toBeNull();
 
     const list = await as(t, owner).query(api.members.list, { workspaceId: ws });
-    expect(list.map((m) => [m.id, m.role]).sort()).toEqual([[owner.userId, "owner"], [bob.userId, "member"]].sort());
+    expect(list!.map((m) => [m.id, m.role]).sort()).toEqual([[owner.userId, "owner"], [bob.userId, "member"]].sort());
     expect(await as(t, owner).query(api.members.listInvites, { workspaceId: ws })).toEqual([]);
-    expect(await errorCode(as(t, bob).query(api.members.listInvites, { workspaceId: ws }))).toBe("Forbidden");
+    // Non-owners get null rather than an error, so a page that is still
+    // subscribed after a role change renders instead of crashing.
+    expect(await as(t, bob).query(api.members.listInvites, { workspaceId: ws })).toBeNull();
+    expect(await as(t, alice).query(api.members.list, { workspaceId: ws })).toBeNull();
   });
 
   it("revoke removes a pending invite", async () => {
@@ -87,12 +107,80 @@ describe("invites", () => {
     const owner = await signUp(t, "owner@example.com");
     const ws = await workspaceFor(t, owner);
     const { token } = (await as(t, owner).mutation(api.members.invite, { workspaceId: ws })) as { token: string };
-    const [pending] = await as(t, owner).query(api.members.listInvites, { workspaceId: ws });
+    const [pending] = (await as(t, owner).query(api.members.listInvites, { workspaceId: ws }))!;
     expect(pending.token).toBe(token);
+    expect(pending.invitedBy).toBe("owner");
     await as(t, owner).mutation(api.members.revokeInvite, { inviteId: pending.id });
     expect(await as(t, owner).query(api.members.listInvites, { workspaceId: ws })).toEqual([]);
     const other = await signUp(t, "other@example.com");
     expect(await errorCode(as(t, other).mutation(api.members.acceptInvite, { token }))).toBe("NotFound");
+  });
+
+  it("expired links can be neither peeked nor redeemed", async () => {
+    const t = fresh();
+    const owner = await signUp(t, "owner@example.com");
+    const ws = await workspaceFor(t, owner);
+    const { token } = (await as(t, owner).mutation(api.members.invite, { workspaceId: ws })) as { token: string };
+    await t.run(async (ctx) => {
+      const invite = await ctx.db.query("invites").withIndex("by_token", (q) => q.eq("token", token)).unique();
+      await ctx.db.patch(invite!._id, { expiresAt: "2020-01-01T00:00:00.000Z" });
+    });
+    const late = await signUp(t, "late@example.com");
+    expect(await as(t, late).query(api.members.peekInvite, { token })).toBeNull();
+    expect(await errorCode(as(t, late).mutation(api.members.acceptInvite, { token }))).toBe("NotFound");
+  });
+
+  it("an existing member opening a link does not use it up", async () => {
+    const t = fresh();
+    const owner = await signUp(t, "owner@example.com");
+    const friend = await signUp(t, "friend@example.com");
+    const ws = await workspaceFor(t, owner);
+    const { token } = (await as(t, owner).mutation(api.members.invite, { workspaceId: ws })) as { token: string };
+    expect(await as(t, owner).query(api.members.peekInvite, { token })).toMatchObject({ alreadyMember: true });
+    expect(await as(t, owner).mutation(api.members.acceptInvite, { token })).toBe(ws);
+    // Still pending, and still works for the person it was meant for.
+    expect(await as(t, owner).query(api.members.listInvites, { workspaceId: ws })).toHaveLength(1);
+    expect(await as(t, friend).query(api.members.peekInvite, { token })).toMatchObject({ alreadyMember: false });
+    expect(await as(t, friend).mutation(api.members.acceptInvite, { token })).toBe(ws);
+  });
+
+  it("links die with their maker's ownership: transfer, removal and leaving revoke them", async () => {
+    const t = fresh();
+    const a = await signUp(t, "a@example.com");
+    const b = await signUp(t, "b@example.com");
+    const stranger = await signUp(t, "stranger@example.com");
+    const ws = await workspaceFor(t, a);
+    const first = (await as(t, a).mutation(api.members.invite, { workspaceId: ws })) as { token: string };
+    await as(t, b).mutation(api.members.acceptInvite, { token: first.token });
+    // A keeps a spare link, hands the workspace to B and is removed by B.
+    const spare = (await as(t, a).mutation(api.members.invite, { workspaceId: ws })) as { token: string };
+    await as(t, a).mutation(api.members.transferOwnership, { workspaceId: ws, toUserId: b.userId });
+    expect(await as(t, b).query(api.members.listInvites, { workspaceId: ws })).toEqual([]);
+    await as(t, b).mutation(api.members.removeMember, { workspaceId: ws, userId: a.userId });
+    // Neither A nor anyone A gave the link to can get in with it.
+    expect(await errorCode(as(t, a).mutation(api.members.acceptInvite, { token: spare.token }))).toBe("NotFound");
+    expect(await errorCode(as(t, stranger).mutation(api.members.acceptInvite, { token: spare.token }))).toBe("NotFound");
+    expect(await as(t, a).query(api.workspace.get, { workspaceId: ws })).toBeNull();
+  });
+
+  it("a link is refused once its maker is no longer an owner, even if the row survived", async () => {
+    const t = fresh();
+    const a = await signUp(t, "a@example.com");
+    const b = await signUp(t, "b@example.com");
+    const c = await signUp(t, "c@example.com");
+    const ws = await workspaceFor(t, a);
+    const { token } = (await as(t, a).mutation(api.members.invite, { workspaceId: ws })) as { token: string };
+    // Demote A behind the API's back (as data written before the cleanup existed would be).
+    await t.run(async (ctx) => {
+      const m = await ctx.db
+        .query("members")
+        .withIndex("by_workspace_user", (q) => q.eq("workspaceId", ws).eq("userId", a.userId))
+        .unique();
+      await ctx.db.patch(m!._id, { role: "member" });
+      await ctx.db.insert("members", { workspaceId: ws, userId: b.userId, role: "owner", joinedAt: "2026-01-01T00:00:00.000Z" });
+    });
+    expect(await as(t, c).query(api.members.peekInvite, { token })).toBeNull();
+    expect(await errorCode(as(t, c).mutation(api.members.acceptInvite, { token }))).toBe("NotFound");
   });
 });
 
@@ -141,13 +229,16 @@ describe("membership changes", () => {
     const { t, owner, member, ws, project } = await team();
     expect(await errorCode(as(t, member).mutation(api.members.transferOwnership, { workspaceId: ws, toUserId: owner.userId }))).toBe("Forbidden");
     await as(t, owner).mutation(api.members.transferOwnership, { workspaceId: ws, toUserId: member.userId });
+    // Demoted, not removed: still a member with read access.
+    const roles = (await as(t, member).query(api.members.list, { workspaceId: ws }))!.map((m) => [m.id, m.role]);
+    expect(roles.sort()).toEqual([[member.userId, "owner"], [owner.userId, "member"]].sort());
+    expect(await as(t, owner).query(api.workspace.get, { workspaceId: ws })).toMatchObject({ role: "member" });
     expect(await errorCode(as(t, owner).mutation(api.members.invite, { workspaceId: ws }))).toBe("Forbidden");
     expect(
       await errorCode(
         as(t, owner).mutation(api.workspace.apply, { workspaceId: ws, op: { type: "deleteProject", id: project.id }, seed: seed() }),
       ),
     ).toBe("Forbidden");
-    await as(t, member).mutation(api.members.leave, { workspaceId: ws }).catch(() => undefined);
     // The new owner is now the last owner and cannot leave.
     expect(await errorCode(as(t, member).mutation(api.members.leave, { workspaceId: ws }))).toBe("Validation");
   });

@@ -84,15 +84,21 @@ export default defineSchema({
 
   // Deleted records, kept so "Undo" restores the server's copy rather than
   // a client-supplied one (which could carry forged comment authors).
-  // Purged by crons.ts after TRASH_TTL_DAYS.
+  // One row per record — a deleted project's issues each get their own row,
+  // tagged with `group` = the project's id — so no trash document can grow
+  // past Convex's document limits however large the project was.
+  // While a row exists its id is reserved: nothing new may be created under
+  // it (convex/lib.ts writeDiff). Purged by crons.ts after TRASH_TTL_DAYS.
   trash: defineTable({
     workspaceId: v.id("workspaces"),
     kind: v.union(v.literal("project"), v.literal("task"), v.literal("post")),
     id: v.string(),
     snapshot: v.any(),
+    group: v.optional(v.string()),
     deletedAt: v.string(),
     deletedBy: v.id("users"),
   })
     .index("by_workspace_kind_id", ["workspaceId", "kind", "id"])
+    .index("by_workspace_group", ["workspaceId", "group"])
     .index("by_deletedAt", ["deletedAt"]),
 });

@@ -309,7 +309,9 @@ export async function loadViewBudgeted(
       theme: "system",
       currentUserId,
       users,
-      labels: labels.docs.map((d) => toRecord(d) as Label),
+      // Scanned newest-first so a cut keeps the newest; shown in insertion
+      // order, which is what addLabel (append) and local mode use.
+      labels: labels.docs.map((d) => toRecord(d) as Label).reverse(),
       projects: projects.docs.map((d) => toRecord(d) as Project).sort(byCreatedAtDesc),
       tasks: tasks.docs.map((d) => toRecord(d) as Task).sort(byCreatedAtDesc),
       posts: posts.docs.map((d) => toRecord(d) as Post).sort(byCreatedAtDesc),
@@ -319,10 +321,13 @@ export async function loadViewBudgeted(
 
 // ── Diff writer ─────────────────────────────────────────────────────────────
 
-/** Structural equality that treats an `undefined` property as absent (Convex strips them). */
+/**
+ * Structural equality that treats an `undefined` property as absent (Convex
+ * strips them) but keeps `null` distinct, as Convex does.
+ */
 export function same(a: unknown, b: unknown): boolean {
   if (a === b) return true;
-  if (a === undefined || b === undefined || a === null || b === null) return a == null && b == null;
+  if (a === undefined || b === undefined || a === null || b === null) return false;
   if (typeof a !== "object" || typeof b !== "object") return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   if (Array.isArray(a)) {
@@ -332,7 +337,10 @@ export function same(a: unknown, b: unknown): boolean {
   const ao = a as Record<string, unknown>;
   const bo = b as Record<string, unknown>;
   const keys = new Set([...Object.keys(ao), ...Object.keys(bo)]);
-  for (const k of keys) if (!same(ao[k], bo[k])) return false;
+  for (const k of keys) {
+    if (ao[k] === undefined && bo[k] === undefined) continue;
+    if (!same(ao[k], bo[k])) return false;
+  }
   return true;
 }
 
@@ -357,17 +365,35 @@ function bounded<T extends Table>(table: T, record: RecordOf<T>): RecordOf<T> {
  * Persist `next` (the replayed collection) against `prev` (what was loaded):
  * insert new ids, replace changed records, delete the ones that vanished.
  * Every record written must satisfy the cloud size limits
- * (src/lib/limits.ts); unchanged records are not re-checked.
+ * (src/lib/limits.ts); unchanged records are not re-checked. `restoring`
+ * names the ids a restore op is bringing back from the trash; every other
+ * insert must use an id the trash does not hold.
  * Only the loaded slice is compared, so an op scoped to one task can never
  * delete the others. Inserts check the whole table for an id collision —
  * the seed's ids come from the client.
  */
+const TRASH_KIND = { projects: "project", tasks: "task", posts: "post" } as const;
+
+/** The trash row holding a deleted record with this id, if any. */
+export async function trashRow(
+  ctx: Ctx,
+  workspaceId: Id<"workspaces">,
+  kind: "project" | "task" | "post",
+  id: string,
+): Promise<Doc<"trash"> | null> {
+  return ctx.db
+    .query("trash")
+    .withIndex("by_workspace_kind_id", (q) => q.eq("workspaceId", workspaceId).eq("kind", kind).eq("id", id))
+    .first();
+}
+
 export async function writeDiff<T extends Table>(
   ctx: MutationCtx,
   table: T,
   workspaceId: Id<"workspaces">,
   prev: Doc<T>[],
   next: RecordOf<T>[],
+  opts: { restoring?: ReadonlySet<string> } = {},
 ): Promise<{ inserted: number; replaced: number; deleted: number }> {
   const appId = (d: Doc<T>) => (d as unknown as { id: string }).id;
   const prevById = new Map(prev.map((d) => [appId(d), d]));
@@ -394,6 +420,13 @@ export async function writeDiff<T extends Table>(
     if (problem) fail("Validation", problem);
     const clash = await findByAppId(ctx, table, workspaceId, id);
     if (clash) fail("Conflict", `A ${table.slice(0, -1)} with id ${id} already exists`);
+    // A deleted record's id stays reserved while it can still be restored;
+    // otherwise a new record could take it and turn the next Undo into a
+    // silent no-op that also discards the snapshot.
+    if (table !== "labels" && !opts.restoring?.has(id)) {
+      const reserved = await trashRow(ctx, workspaceId, TRASH_KIND[table as "projects" | "tasks" | "posts"], id);
+      if (reserved) fail("Conflict", `The id ${id} belongs to a deleted ${table.slice(0, -1)} that can still be restored`);
+    }
     await ctx.db.insert(table, { ...record, workspaceId } as never);
     inserted++;
   }

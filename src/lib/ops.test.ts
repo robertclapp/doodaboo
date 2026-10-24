@@ -9,6 +9,7 @@ import {
   runOp,
   SEED_IDS,
   seededContext,
+  toCloudUpdate,
   toWirePatch,
   TrashLookup,
 } from "./ops";
@@ -227,5 +228,78 @@ describe("ops — clearing fields travels as `unset`", () => {
       () => runOp(seed(), { type: "updateTask", id: "t_p_web_1", patch: {}, unset: ["title"] }),
       (e: unknown) => e instanceof OpError && e.code === "Validation",
     );
+  });
+});
+
+describe("ops — concurrent edits to different parts of a record both survive", () => {
+  it("post content: one person edits the hook while another edits the caption", () => {
+    const base = seed();
+    const post = base.posts[0];
+    // Both clients start from the same post, as the UI does: a whole new content object.
+    const fromA = toCloudUpdate("post", post.id, { content: { ...post.content, hook: "A's hook" } }, post);
+    const fromB = toCloudUpdate("post", post.id, { content: { ...post.content, caption: "B's caption" } }, post);
+    assert.deepEqual((fromA as { contentPatch?: unknown }).contentPatch, { hook: "A's hook" });
+    const afterA = runOp(base, fromA).state;
+    const afterB = runOp(afterA, fromB).state;
+    const final = afterB.posts.find((p) => p.id === post.id)!;
+    assert.equal(final.content.hook, "A's hook");
+    assert.equal(final.content.caption, "B's caption");
+  });
+
+  it("post context: two sliders moved by two people", () => {
+    const base = seed();
+    const post = base.posts[0];
+    const fromA = toCloudUpdate("post", post.id, { context: { ...post.context, novelty: 5 } }, post);
+    const fromB = toCloudUpdate("post", post.id, { context: { ...post.context, emotion: 1 } }, post);
+    const final = runOp(runOp(base, fromA).state, fromB).state.posts.find((p) => p.id === post.id)!;
+    assert.equal(final.context.novelty, 5);
+    assert.equal(final.context.emotion, 1);
+  });
+
+  it("clearing an optional content field travels as contentUnset", () => {
+    const base = seed();
+    const post = { ...base.posts[0], content: { ...base.posts[0].content, durationSec: 30 } };
+    const state = { ...base, posts: base.posts.map((p) => (p.id === post.id ? post : p)) };
+    const op = toCloudUpdate("post", post.id, { content: { ...post.content, durationSec: undefined } }, post);
+    assert.deepEqual((op as { contentUnset?: string[] }).contentUnset, ["durationSec"]);
+    const final = runOp(state, op).state.posts.find((p) => p.id === post.id)!;
+    assert.equal(final.content.durationSec, undefined);
+  });
+
+  it("task labels: two people add different labels", () => {
+    const base = seed();
+    const task = base.tasks[0];
+    const fromA = toCloudUpdate("task", task.id, { labelIds: [...task.labelIds, "l_bug"] }, task);
+    const fromB = toCloudUpdate("task", task.id, { labelIds: [...task.labelIds, "l_feature"] }, task);
+    const final = runOp(runOp(base, fromA).state, fromB).state.tasks.find((t) => t.id === task.id)!;
+    assert.ok(final.labelIds.includes("l_bug"));
+    assert.ok(final.labelIds.includes("l_feature"));
+  });
+
+  it("task labels: a removal and an addition from different people", () => {
+    const base = seed();
+    const task = { ...base.tasks[0], labelIds: ["l_design"] };
+    const state = { ...base, tasks: base.tasks.map((t) => (t.id === task.id ? task : t)) };
+    const fromA = toCloudUpdate("task", task.id, { labelIds: [] }, task);
+    const fromB = toCloudUpdate("task", task.id, { labelIds: ["l_design", "l_perf"] }, task);
+    const final = runOp(runOp(state, fromA).state, fromB).state.tasks.find((t) => t.id === task.id)!;
+    assert.deepEqual(final.labelIds, ["l_perf"]);
+  });
+
+  it("project members: two people add different members", () => {
+    const base = seed();
+    const project = { ...base.projects[0], memberIds: ["u_rob"] };
+    const state = { ...base, projects: base.projects.map((p) => (p.id === project.id ? project : p)) };
+    const fromA = toCloudUpdate("project", project.id, { memberIds: ["u_rob", "u_mina"] }, project);
+    const fromB = toCloudUpdate("project", project.id, { memberIds: ["u_rob", "u_leo"] }, project);
+    const final = runOp(runOp(state, fromA).state, fromB).state.projects.find((p) => p.id === project.id)!;
+    assert.deepEqual(final.memberIds, ["u_rob", "u_mina", "u_leo"]);
+  });
+
+  it("plain fields and unset still pass through", () => {
+    const base = seed();
+    const task = base.tasks.find((t) => t.assigneeId)!;
+    const op = toCloudUpdate("task", task.id, { title: "renamed", assigneeId: undefined }, task);
+    assert.deepEqual(op, { type: "updateTask", id: task.id, patch: { title: "renamed" }, unset: ["assigneeId"] });
   });
 });

@@ -29,10 +29,13 @@ import type {
   EngagementSnapshot,
   Label,
   Post,
+  PostContent,
+  PostContext,
   Project,
   Status,
   Task,
 } from "./types";
+import { deepEqual } from "./deep-equal";
 
 /**
  * The operation protocol between a client and the cloud backend.
@@ -60,6 +63,15 @@ import type {
  * encoding, so "unassign" sent as `{assigneeId: undefined}` would arrive as
  * an empty patch. `patchOf` rebuilds the real `undefined`s on both sides.
  *
+ * Updates carry intent, not snapshots, wherever two people could edit
+ * different parts of the same record at once: a post's `content` and
+ * `context` travel as the changed sub-fields only (`contentPatch`,
+ * `contextPatch`), and a task's labels and a project's members as additions
+ * and removals. The server merges them into its own current record, so
+ * concurrent edits to different fields both survive instead of the last
+ * whole-object write winning. `toCloudUpdate` builds these from the plain
+ * patches the UI already produces.
+ *
  * Restores are the one asymmetric case: deletes move records to a trash on
  * the server, so a restore op carries only an id and both sides look the
  * record up through `OpContext.trash` (the server in its trash table, the
@@ -73,14 +85,28 @@ export type Op =
       type: "createProject";
       data: Partial<Project> & Pick<Project, "name" | "key">;
     }
-  | { type: "updateProject"; id: string; patch: Partial<Project>; unset?: string[] }
+  | {
+      type: "updateProject";
+      id: string;
+      patch: Partial<Project>;
+      unset?: string[];
+      memberIdsAdd?: string[];
+      memberIdsRemove?: string[];
+    }
   | { type: "deleteProject"; id: string }
   | { type: "restoreProject"; id: string }
   | {
       type: "createTask";
       data: Partial<Task> & Pick<Task, "projectId" | "title">;
     }
-  | { type: "updateTask"; id: string; patch: Partial<Task>; unset?: string[] }
+  | {
+      type: "updateTask";
+      id: string;
+      patch: Partial<Task>;
+      unset?: string[];
+      labelIdsAdd?: string[];
+      labelIdsRemove?: string[];
+    }
   | { type: "deleteTask"; id: string }
   | { type: "restoreTask"; id: string }
   | { type: "moveTaskStatus"; id: string; status: Status }
@@ -89,7 +115,15 @@ export type Op =
       type: "createPost";
       data: Partial<Post> & Pick<Post, "title" | "platform">;
     }
-  | { type: "updatePost"; id: string; patch: Partial<Post>; unset?: string[] }
+  | {
+      type: "updatePost";
+      id: string;
+      patch: Partial<Post>;
+      unset?: string[];
+      contentPatch?: Partial<PostContent>;
+      contentUnset?: string[];
+      contextPatch?: Partial<PostContext>;
+    }
   | { type: "deletePost"; id: string }
   | { type: "restorePost"; id: string }
   | { type: "duplicatePost"; id: string; titleSuffix?: string }
@@ -197,6 +231,83 @@ function patchOf<T extends object>(
   return out as Partial<T>;
 }
 
+/** Optional fields of a post's content that a client may clear. */
+export const CONTENT_CLEARABLE: ReadonlySet<string> = new Set(["durationSec"]);
+
+/** Apply additions and removals to an id list: keep order, no duplicates. */
+function mergeIds(base: readonly string[], add: readonly string[] = [], remove: readonly string[] = []): string[] {
+  const drop = new Set(remove);
+  const out = base.filter((id) => !drop.has(id));
+  for (const id of add) if (!drop.has(id) && !out.includes(id)) out.push(id);
+  return out;
+}
+
+function idDelta(before: readonly string[], after: readonly string[]) {
+  const add = after.filter((id) => !before.includes(id));
+  const remove = before.filter((id) => !after.includes(id));
+  return { add, remove };
+}
+
+/** The keys of `next` whose values differ from `prev`, plus the keys `next` clears. */
+function changedFields<T extends object>(prev: T, next: T): { patch: Partial<T>; cleared: string[] } {
+  const patch: Record<string, unknown> = {};
+  const cleared: string[] = [];
+  const p = prev as Record<string, unknown>;
+  const n = next as Record<string, unknown>;
+  for (const k of new Set([...Object.keys(p), ...Object.keys(n)])) {
+    if (deepEqual(p[k], n[k])) continue;
+    if (n[k] === undefined) cleared.push(k);
+    else patch[k] = n[k];
+  }
+  return { patch: patch as Partial<T>, cleared };
+}
+
+/**
+ * Turn a UI patch into the cloud op for an update, given the record as the
+ * client currently sees it: whole `content`/`context` objects become the
+ * changed sub-fields, whole `labelIds`/`memberIds` arrays become additions
+ * and removals, and undefined values become `unset`.
+ */
+export function toCloudUpdate(kind: "project", id: string, patch: Partial<Project>, current: Project | undefined): Op;
+export function toCloudUpdate(kind: "task", id: string, patch: Partial<Task>, current: Task | undefined): Op;
+export function toCloudUpdate(kind: "post", id: string, patch: Partial<Post>, current: Post | undefined): Op;
+export function toCloudUpdate(
+  kind: "project" | "task" | "post",
+  id: string,
+  patch: Partial<Project> | Partial<Task> | Partial<Post>,
+  current: Project | Task | Post | undefined,
+): Op {
+  const rest: Record<string, unknown> = { ...patch };
+  const extra: Record<string, unknown> = {};
+  if (current) {
+    if (kind === "task" && "labelIds" in rest && Array.isArray(rest.labelIds)) {
+      const d = idDelta((current as Task).labelIds, rest.labelIds as string[]);
+      delete rest.labelIds;
+      if (d.add.length) extra.labelIdsAdd = d.add;
+      if (d.remove.length) extra.labelIdsRemove = d.remove;
+    }
+    if (kind === "project" && "memberIds" in rest && Array.isArray(rest.memberIds)) {
+      const d = idDelta((current as Project).memberIds, rest.memberIds as string[]);
+      delete rest.memberIds;
+      if (d.add.length) extra.memberIdsAdd = d.add;
+      if (d.remove.length) extra.memberIdsRemove = d.remove;
+    }
+    if (kind === "post" && rest.content && typeof rest.content === "object") {
+      const c = changedFields((current as Post).content, rest.content as PostContent);
+      delete rest.content;
+      if (Object.keys(c.patch).length) extra.contentPatch = c.patch;
+      if (c.cleared.length) extra.contentUnset = c.cleared;
+    }
+    if (kind === "post" && rest.context && typeof rest.context === "object") {
+      const c = changedFields((current as Post).context, rest.context as PostContext);
+      delete rest.context;
+      if (Object.keys(c.patch).length) extra.contextPatch = c.patch;
+    }
+  }
+  const type = kind === "project" ? "updateProject" : kind === "task" ? "updateTask" : "updatePost";
+  return { type, id, ...toWirePatch(rest), ...extra } as Op;
+}
+
 export interface OpResult {
   state: WorkspaceState;
   /** The created/affected record for ops that produce one. */
@@ -262,11 +373,12 @@ function dispatch(state: WorkspaceState, op: Op, ctx: OpContext): OpResult {
       return { state: r.state, result: r.project };
     }
     case "updateProject": {
-      requireProject(state, op.id);
-      return {
-        state: updateProject(state, op.id, patchOf("project", op.patch, op.unset), ctx),
-        result: undefined,
-      };
+      const current = requireProject(state, op.id);
+      const patch = patchOf("project", op.patch, op.unset);
+      if (op.memberIdsAdd || op.memberIdsRemove) {
+        patch.memberIds = mergeIds(current.memberIds, op.memberIdsAdd, op.memberIdsRemove);
+      }
+      return { state: updateProject(state, op.id, patch, ctx), result: undefined };
     }
     case "deleteProject": {
       const snapshot = snapshotProject(state, op.id);
@@ -287,11 +399,12 @@ function dispatch(state: WorkspaceState, op: Op, ctx: OpContext): OpResult {
       return { state: r.state, result: r.task };
     }
     case "updateTask": {
-      requireTask(state, op.id);
-      return {
-        state: updateTask(state, op.id, patchOf("task", op.patch, op.unset), ctx),
-        result: undefined,
-      };
+      const current = requireTask(state, op.id);
+      const patch = patchOf("task", op.patch, op.unset);
+      if (op.labelIdsAdd || op.labelIdsRemove) {
+        patch.labelIds = mergeIds(current.labelIds, op.labelIdsAdd, op.labelIdsRemove);
+      }
+      return { state: updateTask(state, op.id, patch, ctx), result: undefined };
     }
     case "deleteTask": {
       const snapshot = requireTask(state, op.id);
@@ -320,11 +433,20 @@ function dispatch(state: WorkspaceState, op: Op, ctx: OpContext): OpResult {
       return { state: r.state, result: r.post };
     }
     case "updatePost": {
-      requirePost(state, op.id);
-      return {
-        state: updatePost(state, op.id, patchOf("post", op.patch, op.unset), ctx),
-        result: undefined,
-      };
+      const current = requirePost(state, op.id);
+      const patch = patchOf("post", op.patch, op.unset);
+      if (op.contentPatch || op.contentUnset?.length) {
+        const content: Record<string, unknown> = { ...current.content, ...(patch.content ?? {}), ...(op.contentPatch ?? {}) };
+        for (const k of op.contentUnset ?? []) {
+          if (!CONTENT_CLEARABLE.has(k)) throw new OpError("Validation", `${k} cannot be cleared on a post`);
+          content[k] = undefined;
+        }
+        patch.content = content as unknown as PostContent;
+      }
+      if (op.contextPatch) {
+        patch.context = { ...current.context, ...(patch.context ?? {}), ...op.contextPatch };
+      }
+      return { state: updatePost(state, op.id, patch, ctx), result: undefined };
     }
     case "deletePost": {
       const snapshot = requirePost(state, op.id);

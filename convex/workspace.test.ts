@@ -373,30 +373,90 @@ describe("import / replaceContent", () => {
   it("creates a workspace from a local export, remapping the local owner to the caller", async () => {
     const t = fresh();
     const me = await signUp(t, "me@example.com");
-    const local = emptyWorkspace({ demoPosts: true });
+    const base = emptyWorkspace({ demoPosts: true });
+    const owner = base.currentUserId;
+    // Give the local owner some history to carry over, and another local
+    // user some too.
+    const tasks = base.tasks.map((task, i) =>
+      i === 0
+        ? {
+            ...task,
+            comments: [
+              { id: "c_own", authorId: owner, body: "mine", createdAt: "2026-01-01T00:00:00.000Z" },
+              { id: "c_other", authorId: "u_mina", body: "theirs", createdAt: "2026-01-01T00:00:00.000Z" },
+            ],
+            activity: [...task.activity, { id: "a_own", at: "2026-01-01T00:00:00.000Z", authorId: owner, message: "Commented" }],
+          }
+        : task,
+    );
     const ws = (await as(t, me).mutation(api.workspace.create, {
       name: "Imported",
-      content: { labels: local.labels, projects: local.projects, tasks: local.tasks, posts: local.posts },
-      fromUserId: local.currentUserId,
+      content: { labels: base.labels, projects: base.projects, tasks, posts: base.posts },
+      fromUserId: owner,
     })) as Id<"workspaces">;
     const view = (await as(t, me).query(api.workspace.get, { workspaceId: ws })) as WorkspaceView;
-    expect(view.state.projects).toHaveLength(local.projects.length);
-    expect(view.state.tasks).toHaveLength(local.tasks.length);
-    expect(view.state.posts).toHaveLength(local.posts.length);
-    // Every project the local owner led is now led by the caller; other
-    // local users are not members here, so their references are dropped.
-    for (const p of view.state.projects) {
-      expect(p.leadId === me.userId || p.leadId === undefined).toBe(true);
-      for (const m of p.memberIds) expect(m).toBe(me.userId);
-    }
-    for (const task of view.state.tasks) {
-      expect(task.assigneeId === me.userId || task.assigneeId === undefined).toBe(true);
-    }
-    // History keeps unknown authors (rendered as former members), the
-    // importer's own entries are theirs.
-    const ownLocalEntries = local.tasks.flatMap((x) => x.activity.filter((a) => a.authorId === local.currentUserId)).length;
-    const remapped = view.state.tasks.flatMap((x) => x.activity.filter((a) => a.authorId === me.userId)).length;
-    expect(remapped).toBe(ownLocalEntries);
+    expect(view.state.projects).toHaveLength(base.projects.length);
+    expect(view.state.tasks).toHaveLength(base.tasks.length);
+    expect(view.state.posts).toHaveLength(base.posts.length);
+
+    // Exactly what the local owner led, belonged to and was assigned is now the caller's.
+    const led = base.projects.filter((p) => p.leadId === owner).length;
+    const memberOf = base.projects.filter((p) => p.memberIds.includes(owner)).length;
+    const assigned = base.tasks.filter((x) => x.assigneeId === owner).length;
+    expect(led).toBeGreaterThan(0);
+    expect(assigned).toBeGreaterThan(0);
+    expect(view.state.projects.filter((p) => p.leadId === me.userId)).toHaveLength(led);
+    expect(view.state.projects.filter((p) => p.memberIds.includes(me.userId))).toHaveLength(memberOf);
+    expect(view.state.tasks.filter((x) => x.assigneeId === me.userId)).toHaveLength(assigned);
+    // Other local users are not members here: their references are dropped.
+    for (const p of view.state.projects) for (const m of p.memberIds) expect(m).toBe(me.userId);
+
+    // The importer's own history is theirs; anyone else's can never resolve
+    // to a real account; system activity stays authorless.
+    const first = view.state.tasks.find((x) => x.id === base.tasks[0].id)!;
+    expect(first.comments.find((c) => c.id === "c_own")?.authorId).toBe(me.userId);
+    expect(first.comments.find((c) => c.id === "c_other")?.authorId).toBe("imported:u_mina");
+    expect(first.activity.find((a) => a.id === "a_own")?.authorId).toBe(me.userId);
+    const systemBefore = base.tasks.flatMap((x) => x.activity).filter((a) => a.authorId === undefined).length;
+    const systemAfter = view.state.tasks.flatMap((x) => x.activity).filter((a) => a.authorId === undefined).length;
+    expect(systemAfter).toBe(systemBefore);
+  });
+
+  it("an import cannot attribute history to a real member", async () => {
+    const t = fresh();
+    const owner = await signUp(t, "owner@example.com");
+    const victim = await signUp(t, "victim@example.com");
+    const ws = await workspaceFor(t, owner);
+    const { token } = (await as(t, owner).mutation(api.members.invite, { workspaceId: ws })) as { token: string };
+    await as(t, victim).mutation(api.members.acceptInvite, { token });
+    const base = emptyWorkspace({ demoPosts: false });
+    const forged = {
+      ...base.tasks[0],
+      comments: [{ id: "c1", authorId: victim.userId, body: "I approve", createdAt: "2026-01-01T00:00:00.000Z" }],
+      activity: [{ id: "a1", at: "2026-01-01T00:00:00.000Z", authorId: victim.userId, message: "Status → done" }],
+    };
+    await as(t, owner).mutation(api.workspace.replaceContent, {
+      workspaceId: ws,
+      content: { labels: [], projects: base.projects, tasks: [forged], posts: [] },
+    });
+    const view = (await as(t, owner).query(api.workspace.get, { workspaceId: ws })) as WorkspaceView;
+    const task = view.state.tasks[0];
+    expect(task.comments[0].authorId).toBe(`imported:${victim.userId}`);
+    expect(task.activity[0].authorId).toBe(`imported:${victim.userId}`);
+    expect(view.state.users.some((u) => u.id === task.comments[0].authorId)).toBe(false);
+  });
+
+  it("without fromUserId, no history is credited to the importer", async () => {
+    const t = fresh();
+    const me = await signUp(t, "me@example.com");
+    const base = emptyWorkspace({ demoPosts: false });
+    const ws = (await as(t, me).mutation(api.workspace.create, {
+      name: "Imported",
+      content: { labels: base.labels, projects: base.projects, tasks: base.tasks, posts: [] },
+    })) as Id<"workspaces">;
+    const view = (await as(t, me).query(api.workspace.get, { workspaceId: ws })) as WorkspaceView;
+    const credited = view.state.tasks.flatMap((x) => [...x.activity, ...x.comments]).filter((e) => e.authorId === me.userId);
+    expect(credited).toEqual([]);
   });
 
   it("replaceContent is owner-only and rejects dangling or duplicate ids", async () => {

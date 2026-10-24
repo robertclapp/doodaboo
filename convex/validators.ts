@@ -242,6 +242,31 @@ export const postPatch = v.object({
   playbookId: v.optional(v.string()),
 });
 
+/** Changed sub-fields of a post's content / context (see toCloudUpdate in src/lib/ops.ts). */
+export const contentPatch = v.object({
+  hook: v.optional(v.string()),
+  caption: v.optional(v.string()),
+  hashtags: v.optional(v.array(v.string())),
+  transcript: v.optional(v.string()),
+  format: v.optional(postFormat),
+  durationSec: v.optional(v.number()),
+  hasTrendingAudio: v.optional(v.boolean()),
+});
+export const contextPatch = v.object({
+  audienceSize: v.optional(v.number()),
+  accountAvgViews: v.optional(v.number()),
+  postingHour: v.optional(v.number()),
+  dayOfWeek: v.optional(v.number()),
+  topicCategory: v.optional(v.string()),
+  novelty: v.optional(rating),
+  emotion: v.optional(rating),
+  trendMatch: v.optional(rating),
+  sentiment: v.optional(
+    v.union(v.literal("negative"), v.literal("neutral"), v.literal("positive"), v.literal("controversial")),
+  ),
+});
+const idList = v.optional(v.array(v.string()));
+
 export const op = v.union(
   v.object({ type: v.literal("addLabel"), data: v.object({ name: v.string(), color: v.string() }) }),
   v.object({ type: v.literal("removeLabel"), id: v.string() }),
@@ -260,7 +285,14 @@ export const op = v.union(
       accent: v.optional(v.string()),
     }),
   }),
-  v.object({ type: v.literal("updateProject"), id: v.string(), patch: projectPatch, unset }),
+  v.object({
+    type: v.literal("updateProject"),
+    id: v.string(),
+    patch: projectPatch,
+    unset,
+    memberIdsAdd: idList,
+    memberIdsRemove: idList,
+  }),
   v.object({ type: v.literal("deleteProject"), id: v.string() }),
   v.object({ type: v.literal("restoreProject"), id: v.string() }),
   v.object({
@@ -278,7 +310,14 @@ export const op = v.union(
       estimate: v.optional(v.number()),
     }),
   }),
-  v.object({ type: v.literal("updateTask"), id: v.string(), patch: taskPatch, unset }),
+  v.object({
+    type: v.literal("updateTask"),
+    id: v.string(),
+    patch: taskPatch,
+    unset,
+    labelIdsAdd: idList,
+    labelIdsRemove: idList,
+  }),
   v.object({ type: v.literal("deleteTask"), id: v.string() }),
   v.object({ type: v.literal("restoreTask"), id: v.string() }),
   v.object({ type: v.literal("moveTaskStatus"), id: v.string(), status }),
@@ -298,7 +337,15 @@ export const op = v.union(
       playbookId: v.optional(v.string()),
     }),
   }),
-  v.object({ type: v.literal("updatePost"), id: v.string(), patch: postPatch, unset }),
+  v.object({
+    type: v.literal("updatePost"),
+    id: v.string(),
+    patch: postPatch,
+    unset,
+    contentPatch: v.optional(contentPatch),
+    contentUnset: unset,
+    contextPatch: v.optional(contextPatch),
+  }),
   v.object({ type: v.literal("deletePost"), id: v.string() }),
   v.object({ type: v.literal("restorePost"), id: v.string() }),
   v.object({ type: v.literal("duplicatePost"), id: v.string(), titleSuffix: v.optional(v.string()) }),

@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import {
   fail,
@@ -20,11 +21,16 @@ const INVITE_TTL_DAYS = 7;
 const HANDLE = /^[a-z0-9_]{2,24}$/;
 const COLOR = /^#[0-9a-f]{6}$/i;
 
-/** Members of a workspace, for the Team page. */
+/**
+ * Members of a workspace, for the Team page. Null (not an error) when the
+ * caller is no longer a member, so a page open during a removal renders
+ * nothing instead of crashing; WorkspaceSync then returns them to the picker.
+ */
 export const list = query({
   args: { workspaceId: v.id("workspaces") },
   handler: async (ctx, { workspaceId }) => {
-    await requireMember(ctx, workspaceId);
+    const userId = await requireUserId(ctx);
+    if (!(await findMembership(ctx, workspaceId, userId))) return null;
     const { members } = await loadMembers(ctx, workspaceId);
     const out = [];
     for (const m of members) {
@@ -62,22 +68,62 @@ export const invite = mutation({
   },
 });
 
-/** Pending invites, with their tokens, so an owner can copy a link again. */
+/**
+ * Pending invites, with their tokens and who made them, so an owner can copy
+ * or audit a link. Null for anyone who is not an owner: the Team page may
+ * still be subscribed for a moment after its user stops being one (an
+ * ownership transfer), and that must not throw during render.
+ */
 export const listInvites = query({
   args: { workspaceId: v.id("workspaces") },
   handler: async (ctx, { workspaceId }) => {
-    const member = await requireMember(ctx, workspaceId);
-    requireOwner(member);
+    const userId = await requireUserId(ctx);
+    const membership = await findMembership(ctx, workspaceId, userId);
+    if (!membership || membership.role !== "owner") return null;
     const now = nowIso();
     const invites = await ctx.db
       .query("invites")
       .withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId))
       .collect();
-    return invites
-      .filter((i) => !i.acceptedBy && i.expiresAt > now)
-      .map((i) => ({ id: i._id, token: i.token, email: i.email, createdAt: i.createdAt, expiresAt: i.expiresAt }));
+    const out = [];
+    for (const i of invites) {
+      if (i.acceptedBy || i.expiresAt <= now) continue;
+      const by = await ctx.db.get(i.invitedBy);
+      out.push({
+        id: i._id,
+        token: i.token,
+        email: i.email,
+        createdAt: i.createdAt,
+        expiresAt: i.expiresAt,
+        invitedBy: by ? toUser(by).name : "a former owner",
+      });
+    }
+    return out;
   },
 });
+
+/**
+ * An invite is live only while the person who made it is still an owner of
+ * the workspace: a link must not outlive its maker's authority.
+ */
+async function usableInvite(ctx: QueryCtx | MutationCtx, token: string) {
+  const invite = await ctx.db.query("invites").withIndex("by_token", (q) => q.eq("token", token)).unique();
+  if (!invite || invite.acceptedBy || invite.expiresAt <= nowIso()) return null;
+  const maker = await findMembership(ctx, invite.workspaceId, invite.invitedBy);
+  if (!maker || maker.role !== "owner") return null;
+  const workspace = await ctx.db.get(invite.workspaceId);
+  if (!workspace) return null;
+  return { invite, workspace };
+}
+
+/** Delete the pending invites a person made in a workspace. */
+async function revokeInvitesBy(ctx: MutationCtx, workspaceId: Id<"workspaces">, userId: Id<"users">) {
+  const invites = await ctx.db
+    .query("invites")
+    .withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId))
+    .collect();
+  for (const i of invites) if (!i.acceptedBy && i.invitedBy === userId) await ctx.db.delete(i._id);
+}
 
 export const revokeInvite = mutation({
   args: { inviteId: v.id("invites") },
@@ -89,41 +135,46 @@ export const revokeInvite = mutation({
   },
 });
 
-/** What an invite link points at, so the join page can show the workspace name. */
+/**
+ * What an invite link points at, so the join page can show the workspace
+ * name — and whether the caller is already in it, in which case the page
+ * offers "Open" and the link is left for the person it was meant for.
+ */
 export const peekInvite = query({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
-    await requireUserId(ctx);
-    const invite = await ctx.db.query("invites").withIndex("by_token", (q) => q.eq("token", token)).unique();
-    if (!invite || invite.acceptedBy || invite.expiresAt <= nowIso()) return null;
-    const workspace = await ctx.db.get(invite.workspaceId);
-    return workspace ? { workspaceId: workspace._id, name: workspace.name } : null;
+    const userId = await requireUserId(ctx);
+    const found = await usableInvite(ctx, token);
+    if (!found) return null;
+    const alreadyMember = !!(await findMembership(ctx, found.workspace._id, userId));
+    return { workspaceId: found.workspace._id, name: found.workspace.name, alreadyMember };
   },
 });
 
-/** Redeem an invite for the caller. Single use, expiring. */
+/**
+ * Redeem an invite for the caller. Single use and expiring; a caller who is
+ * already a member gets the workspace id back without using the link up.
+ */
 export const acceptInvite = mutation({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
     const userId = await requireUserId(ctx);
-    const invite = await ctx.db.query("invites").withIndex("by_token", (q) => q.eq("token", token)).unique();
-    if (!invite || invite.acceptedBy) fail("NotFound", "This invite link is no longer valid");
+    const found = await usableInvite(ctx, token);
+    if (!found) fail("NotFound", "This invite link is no longer valid");
+    const { invite } = found;
+    if (await findMembership(ctx, invite.workspaceId, userId)) return invite.workspaceId;
     const now = nowIso();
-    if (invite.expiresAt <= now) fail("NotFound", "This invite link has expired");
-    const workspace = await ctx.db.get(invite.workspaceId);
-    if (!workspace) fail("NotFound", "That workspace no longer exists");
-    if (!(await findMembership(ctx, invite.workspaceId, userId))) {
-      await ctx.db.insert("members", { workspaceId: invite.workspaceId, userId, role: "member", joinedAt: now });
-    }
+    await ctx.db.insert("members", { workspaceId: invite.workspaceId, userId, role: "member", joinedAt: now });
     await ctx.db.patch(invite._id, { acceptedBy: userId, acceptedAt: now });
     return invite.workspaceId;
   },
 });
 
-/** Drop a member and clear their assignments (lead / member / assignee). */
-async function dropMember(ctx: Parameters<typeof removeUserCascade>[0], workspaceId: Id<"workspaces">, userId: Id<"users">) {
+/** Drop a member: their assignments (lead / member / assignee) and any invite links they made go with them. */
+async function dropMember(ctx: MutationCtx, workspaceId: Id<"workspaces">, userId: Id<"users">) {
   const membership = await findMembership(ctx, workspaceId, userId);
   if (membership) await ctx.db.delete(membership._id);
+  await revokeInvitesBy(ctx, workspaceId, userId);
   await removeUserCascade(ctx, workspaceId, userId);
 }
 
@@ -179,6 +230,8 @@ export const transferOwnership = mutation({
     if (!target) fail("NotFound", "That person is not a member");
     await ctx.db.patch(target._id, { role: "owner" });
     await ctx.db.patch(member.doc._id, { role: "member" });
+    // A demoted owner's links would otherwise keep admitting people.
+    await revokeInvitesBy(ctx, workspaceId, member.userId);
   },
 });
 
