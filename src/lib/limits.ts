@@ -33,6 +33,13 @@ export const LIMITS = {
   },
   /** Per stored record, measured the way Convex measures documents. Convex itself caps documents at 1 MiB. */
   recordBytes: 256 * 1024,
+  /**
+   * One project delete, and its Undo, moves the project and every issue in it
+   * in a single Convex transaction (the arithmetic is in convex/workspace.ts).
+   * The browser checks the same caps before sending, so a too-large delete is
+   * refused before the project vanishes from the screen.
+   */
+  deleteProject: { issues: 3000, bytes: 5 * 1024 * 1024 },
 } as const;
 
 export type RecordKind = "labels" | "projects" | "tasks" | "posts";

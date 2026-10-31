@@ -172,6 +172,8 @@ export const revokeInvite = mutation({
  * What an invite link points at, so the join page can show the workspace
  * name — and whether the caller is already in it, in which case the page
  * offers "Open" and the link is left for the person it was meant for.
+ * `redeemedByYou` marks the caller's own, already used link (they joined
+ * with it), so the page does not claim it is still unused.
  */
 export const peekInvite = query({
   args: { token: v.string() },
@@ -184,12 +186,12 @@ export const peekInvite = query({
       const used = await ctx.db.query("invites").withIndex("by_token", (q) => q.eq("token", token)).unique();
       if (used && used.acceptedBy === userId && (await findMembership(ctx, used.workspaceId, userId))) {
         const workspace = await ctx.db.get(used.workspaceId);
-        if (workspace) return { workspaceId: workspace._id, name: workspace.name, alreadyMember: true };
+        if (workspace) return { workspaceId: workspace._id, name: workspace.name, alreadyMember: true, redeemedByYou: true };
       }
       return null;
     }
     const alreadyMember = !!(await findMembership(ctx, found.workspace._id, userId));
-    return { workspaceId: found.workspace._id, name: found.workspace.name, alreadyMember };
+    return { workspaceId: found.workspace._id, name: found.workspace.name, alreadyMember, redeemedByYou: false };
   },
 });
 

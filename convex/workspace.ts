@@ -34,7 +34,7 @@ import {
 } from "../src/lib/ops";
 import type { ProjectSnapshot, WorkspaceState } from "../src/lib/mutations";
 import type { Post, Project, Task } from "../src/lib/types";
-import { checkRecord, recordBytes, type RecordKind } from "../src/lib/limits";
+import { checkRecord, LIMITS, recordBytes, type RecordKind } from "../src/lib/limits";
 
 /** One import (create with content, or replaceContent) must fit in one Convex transaction's writes. */
 const IMPORT_MAX_BYTES = 8 * 1024 * 1024;
@@ -155,8 +155,8 @@ async function trashLookup(ctx: MutationCtx, workspaceId: Id<"workspaces">, op: 
  * re-read by its delete); the query count is constant. These caps keep
  * both directions well inside every limit.
  */
-const DELETE_MAX_BYTES = 5 * 1024 * 1024;
-export const DELETE_MAX_RECORDS = 3000;
+const DELETE_MAX_BYTES = LIMITS.deleteProject.bytes;
+export const DELETE_MAX_RECORDS = LIMITS.deleteProject.issues;
 
 function validateSeed(seed: { ids: string[]; now: string }): { ids: string[]; now: string } {
   if (seed.ids.length > SEED_IDS * 2) fail("Validation", "Too many seed ids");
