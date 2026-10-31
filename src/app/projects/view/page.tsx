@@ -50,6 +50,9 @@ function ProjectDetailPage({ id: projectId }: { id: string }) {
   const users = useStore((s) => s.users);
   const updateProject = useStore((s) => s.updateProject);
   const deleteProject = useStore((s) => s.deleteProject);
+  // In a cloud workspace only owners may delete a project (the server
+  // enforces it); members do not get a button that would only fail.
+  const canDelete = useStore((s) => !s.cloud || s.cloud.role === "owner");
   const restoreProject = useStore((s) => s.restoreProject);
   const hydrated = useStore((s) => s.hydrated);
 
@@ -92,8 +95,7 @@ function ProjectDetailPage({ id: projectId }: { id: string }) {
     .map((id) => users.find((u) => u.id === id))
     .filter(Boolean);
   const done = tasks.filter((t) => t.status === "done").length;
-  const pct =
-    tasks.length > 0 ? Math.round((done / tasks.length) * 100) : 0;
+  const pct = tasks.length > 0 ? Math.round((done / tasks.length) * 100) : 0;
 
   return (
     <>
@@ -119,37 +121,39 @@ function ProjectDetailPage({ id: projectId }: { id: string }) {
         }
         trailing={
           <>
-            <Button
-              variant="ghost"
-              size="sm"
-              iconLeft={<Trash2 size={12} />}
-              onClick={async () => {
-                const ok = await confirm({
-                  title: "Delete project",
-                  message: `This will delete "${project.name}" and all its tasks.`,
-                  confirmLabel: "Delete project",
-                  destructive: true,
-                });
-                if (ok) {
-                  // Snapshot project + cascaded tasks BEFORE the delete so
-                  // Undo can restore both with their original IDs intact.
-                  const snapshot = {
-                    project,
-                    tasks: tasks.slice(),
-                  };
-                  deleteProject(project.id);
-                  toast.success(`Deleted ${project.name}`, {
-                    action: {
-                      label: "Undo",
-                      onClick: () => restoreProject(snapshot),
-                    },
+            {canDelete && (
+              <Button
+                variant="ghost"
+                size="sm"
+                iconLeft={<Trash2 size={12} />}
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: "Delete project",
+                    message: `This will delete "${project.name}" and all its tasks.`,
+                    confirmLabel: "Delete project",
+                    destructive: true,
                   });
-                  router.push("/projects");
-                }
-              }}
-            >
-              Delete
-            </Button>
+                  if (ok) {
+                    // Snapshot project + cascaded tasks BEFORE the delete so
+                    // Undo can restore both with their original IDs intact.
+                    const snapshot = {
+                      project,
+                      tasks: tasks.slice(),
+                    };
+                    deleteProject(project.id);
+                    toast.success(`Deleted ${project.name}`, {
+                      action: {
+                        label: "Undo",
+                        onClick: () => restoreProject(snapshot),
+                      },
+                    });
+                    router.push("/projects");
+                  }
+                }}
+              >
+                Delete
+              </Button>
+            )}
           </>
         }
         tabs={

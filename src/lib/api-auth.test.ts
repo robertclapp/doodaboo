@@ -182,3 +182,24 @@ describe("authorizeApiRequest — local serve mode", () => {
     assert.equal(d.ok === false && d.status, 503);
   });
 });
+
+describe("authorizeApiRequest — cloud mode", () => {
+  const base = { pathname: "/api/workspace", authorization: null, isProduction: true };
+
+  it("refuses the local API when the build talks to a Convex deployment", () => {
+    const d = authorizeApiRequest({ ...base, token: "secret", authorization: "Bearer secret", cloudMode: true });
+    assert.equal(d.ok, false);
+    if (!d.ok) {
+      assert.equal(d.status, 503);
+      assert.match(d.message, /cloud mode/);
+    }
+  });
+
+  it("keeps the healthcheck open and `doodaboo serve` on loopback working", () => {
+    assert.deepEqual(authorizeApiRequest({ ...base, pathname: "/api/health", token: undefined, cloudMode: true }), { ok: true });
+    assert.deepEqual(
+      authorizeApiRequest({ ...base, token: undefined, cloudMode: true, localServe: true }),
+      { ok: true },
+    );
+  });
+});

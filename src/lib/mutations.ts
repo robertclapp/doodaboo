@@ -145,8 +145,10 @@ function stripIdentity<T extends object>(
 export function addUser(
   state: WorkspaceState,
   data: Omit<User, "id">,
+  ctx: ActorContext = {},
 ): { state: WorkspaceState; user: User } {
-  const user: User = { id: `u_${nanoid(6)}`, ...data };
+  const g = gen(ctx);
+  const user: User = { id: `u_${g.id()}`, ...data };
   return { state: { ...state, users: [...state.users, user] }, user };
 }
 
@@ -174,8 +176,10 @@ export function removeUser(
 export function addLabel(
   state: WorkspaceState,
   data: Omit<Label, "id">,
+  ctx: ActorContext = {},
 ): { state: WorkspaceState; label: Label } {
-  const label: Label = { id: `l_${nanoid(6)}`, ...data };
+  const g = gen(ctx);
+  const label: Label = { id: `l_${g.id()}`, ...data };
   return { state: { ...state, labels: [...state.labels, label] }, label };
 }
 
@@ -198,9 +202,11 @@ export function removeLabel(
 export function createProject(
   state: WorkspaceState,
   data: Partial<Project> & Pick<Project, "name" | "key">,
+  ctx: ActorContext = {},
 ): { state: WorkspaceState; project: Project } {
+  const g = gen(ctx);
   const project: Project = {
-    id: `p_${nanoid(6)}`,
+    id: `p_${g.id()}`,
     key: data.key,
     name: data.name,
     description: data.description ?? "",
@@ -211,8 +217,8 @@ export function createProject(
     targetDate: data.targetDate,
     icon: data.icon ?? data.name.charAt(0).toUpperCase(),
     accent: data.accent ?? "#ff5c1a",
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
+    createdAt: g.now(),
+    updatedAt: g.now(),
     nextTaskNumber: 1,
   };
   return {
@@ -225,11 +231,13 @@ export function updateProject(
   state: WorkspaceState,
   id: string,
   patch: Partial<Project>,
+  ctx: ActorContext = {},
 ): WorkspaceState {
+  const g = gen(ctx);
   return {
     ...state,
     projects: state.projects.map((p) =>
-      p.id === id ? { ...p, ...patch, updatedAt: nowIso() } : p,
+      p.id === id ? { ...p, ...patch, updatedAt: g.now() } : p,
     ),
   };
 }
@@ -298,6 +306,22 @@ export function restoreProject(
  */
 export interface ActorContext {
   actorId?: string;
+  /**
+   * Draw the next id. Defaults to nanoid. The cloud sync layer injects a
+   * pre-drawn sequence so the optimistic client apply and the server replay
+   * of the same op produce byte-identical records (see src/lib/ops.ts).
+   */
+  ids?: () => string;
+  /** Current time as ISO. Defaults to the wall clock; injected like `ids`. */
+  now?: () => string;
+}
+
+/** Resolve the generators an operation will use for ids and timestamps. */
+function gen(ctx: ActorContext) {
+  return {
+    id: () => ctx.ids?.() ?? nanoid(6),
+    now: () => ctx.now?.() ?? nowIso(),
+  };
 }
 
 export function createTask(
@@ -305,6 +329,7 @@ export function createTask(
   data: Partial<Task> & Pick<Task, "projectId" | "title">,
   ctx: ActorContext = {},
 ): { state: WorkspaceState; task: Task } {
+  const g = gen(ctx);
   const project = state.projects.find((p) => p.id === data.projectId);
   if (!project) {
     throw new ReferenceNotFoundError(
@@ -314,7 +339,7 @@ export function createTask(
   const number = project.nextTaskNumber;
   const actor = ctx.actorId ?? state.currentUserId;
   const task: Task = {
-    id: `t_${nanoid(6)}`,
+    id: `t_${g.id()}`,
     projectId: data.projectId,
     number,
     type: data.type ?? "task",
@@ -326,13 +351,13 @@ export function createTask(
     labelIds: data.labelIds ?? [],
     dueDate: data.dueDate,
     estimate: data.estimate,
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
+    createdAt: g.now(),
+    updatedAt: g.now(),
     comments: [],
     activity: [
       {
-        id: nanoid(6),
-        at: nowIso(),
+        id: g.id(),
+        at: g.now(),
         authorId: actor,
         message: `Created ${data.type ?? "task"}`,
       },
@@ -358,22 +383,23 @@ export function updateTask(
   patch: Partial<Task>,
   ctx: ActorContext = {},
 ): WorkspaceState {
+  const g = gen(ctx);
   const existing = state.tasks.find((t) => t.id === id);
   if (!existing) return state;
   const actor = ctx.actorId ?? state.currentUserId;
   const entries: ActivityEntry[] = [];
   if (patch.status && patch.status !== existing.status) {
     entries.push({
-      id: nanoid(6),
-      at: nowIso(),
+      id: g.id(),
+      at: g.now(),
       authorId: actor,
       message: `Status → ${patch.status.replace("_", " ")}`,
     });
   }
   if (patch.priority && patch.priority !== existing.priority) {
     entries.push({
-      id: nanoid(6),
-      at: nowIso(),
+      id: g.id(),
+      at: g.now(),
       authorId: actor,
       message: `Priority → ${patch.priority}`,
     });
@@ -390,8 +416,8 @@ export function updateTask(
       ? state.users.find((x) => x.id === nextAssignee)
       : undefined;
     entries.push({
-      id: nanoid(6),
-      at: nowIso(),
+      id: g.id(),
+      at: g.now(),
       authorId: actor,
       message: u
         ? `Assigned to @${u.handle}`
@@ -407,7 +433,7 @@ export function updateTask(
         ? {
             ...t,
             ...stripIdentity(patch, TASK_IDENTITY_FIELDS),
-            updatedAt: nowIso(),
+            updatedAt: g.now(),
             activity: [...t.activity, ...entries],
           }
         : t,
@@ -449,14 +475,15 @@ export function addComment(
   body: string,
   ctx: ActorContext = {},
 ): { state: WorkspaceState; comment: Comment | undefined } {
+  const g = gen(ctx);
   const clean = body.trim();
   if (!clean) return { state, comment: undefined };
   const actor = ctx.actorId ?? state.currentUserId;
   const comment: Comment = {
-    id: nanoid(6),
+    id: g.id(),
     authorId: actor,
     body: clean,
-    createdAt: nowIso(),
+    createdAt: g.now(),
   };
   return {
     state: {
@@ -469,8 +496,8 @@ export function addComment(
               activity: [
                 ...t.activity,
                 {
-                  id: nanoid(6),
-                  at: nowIso(),
+                  id: g.id(),
+                  at: g.now(),
                   authorId: actor,
                   message: "Commented",
                 },
@@ -488,9 +515,11 @@ export function addComment(
 export function createPost(
   state: WorkspaceState,
   data: Partial<Post> & Pick<Post, "title" | "platform">,
+  ctx: ActorContext = {},
 ): { state: WorkspaceState; post: Post } {
+  const g = gen(ctx);
   const post: Post = {
-    id: `po_${nanoid(6)}`,
+    id: `po_${g.id()}`,
     projectId: data.projectId,
     title: data.title,
     platform: data.platform,
@@ -523,8 +552,8 @@ export function createPost(
       trendMatch: 3,
       sentiment: "neutral",
     },
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
+    createdAt: g.now(),
+    updatedAt: g.now(),
   };
   return {
     state: { ...state, posts: [post, ...state.posts] },
@@ -536,12 +565,14 @@ export function updatePost(
   state: WorkspaceState,
   id: string,
   patch: Partial<Post>,
+  ctx: ActorContext = {},
 ): WorkspaceState {
+  const g = gen(ctx);
   return {
     ...state,
     posts: state.posts.map((p) =>
       p.id === id
-        ? { ...p, ...stripIdentity(patch, POST_IDENTITY_FIELDS), updatedAt: nowIso() }
+        ? { ...p, ...stripIdentity(patch, POST_IDENTITY_FIELDS), updatedAt: g.now() }
         : p,
     ),
   };
@@ -570,20 +601,22 @@ export function duplicatePost(
   state: WorkspaceState,
   id: string,
   opts?: { titleSuffix?: string },
+  ctx: ActorContext = {},
 ): { state: WorkspaceState; post: Post | undefined } {
+  const g = gen(ctx);
   const original = state.posts.find((p) => p.id === id);
   if (!original) return { state, post: undefined };
   const suffix = opts?.titleSuffix ?? " (variant)";
   const copy: Post = {
     ...original,
-    id: `po_${nanoid(6)}`,
+    id: `po_${g.id()}`,
     title: `${original.title}${suffix}`.trim(),
     status: "draft",
     scheduledAt: undefined,
     postedAt: undefined,
     snapshots: [],
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
+    createdAt: g.now(),
+    updatedAt: g.now(),
   };
   return { state: { ...state, posts: [copy, ...state.posts] }, post: copy };
 }
@@ -592,7 +625,9 @@ export function addSnapshot(
   state: WorkspaceState,
   postId: string,
   snapshot: Omit<EngagementSnapshot, "id" | "capturedAt">,
+  ctx: ActorContext = {},
 ): { state: WorkspaceState; snapshot: EngagementSnapshot } {
+  const g = gen(ctx);
   // Reject NaN/Infinity/negative inputs before they hit disk. The CLI
   // and API both go through here, so this is the single chokepoint
   // that guarantees engagement math doesn't divide by garbage.
@@ -627,8 +662,8 @@ export function addSnapshot(
   }
 
   const snap: EngagementSnapshot = {
-    id: nanoid(6),
-    capturedAt: nowIso(),
+    id: g.id(),
+    capturedAt: g.now(),
     ...snapshot,
   };
   return {
@@ -641,7 +676,7 @@ export function addSnapshot(
               snapshots: [...p.snapshots, snap].sort(
                 (a, b) => a.atMinutes - b.atMinutes,
               ),
-              updatedAt: nowIso(),
+              updatedAt: g.now(),
             }
           : p,
       ),
@@ -654,7 +689,9 @@ export function removeSnapshot(
   state: WorkspaceState,
   postId: string,
   snapshotId: string,
+  ctx: ActorContext = {},
 ): WorkspaceState {
+  const g = gen(ctx);
   return {
     ...state,
     posts: state.posts.map((p) =>
@@ -662,7 +699,7 @@ export function removeSnapshot(
         ? {
             ...p,
             snapshots: p.snapshots.filter((x) => x.id !== snapshotId),
-            updatedAt: nowIso(),
+            updatedAt: g.now(),
           }
         : p,
     ),

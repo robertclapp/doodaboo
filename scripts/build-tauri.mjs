@@ -28,7 +28,7 @@
  * `tauri dev` runs against devUrl) is untouched, so the desktop dev loop
  * keeps SSR, the API, and hot reload.
  */
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -135,6 +135,32 @@ const parked = park();
 log(`parked ${parked} server-only path(s); running next build in export mode`);
 
 rmSync(path.join(root, "out"), { recursive: true, force: true });
+
+// Which backend the bundle talks to is decided here, explicitly. Next
+// inlines NEXT_PUBLIC_* from the environment and from the .env files —
+// `npx convex dev` writes NEXT_PUBLIC_CONVEX_URL into .env.local — so
+// without this guard every desktop/mobile build on a machine that has ever
+// run the cloud setup would be silently wired to that developer's deployment.
+// Pass DOODABOO_TAURI_CLOUD=1 to build a cloud-connected bundle on purpose.
+//
+// Work out the URL Next *would* inline, with Next's own loader (it fills
+// only keys the environment does not already define). For a local-first
+// bundle the child gets the key pinned to "" — defined, so .env.local cannot
+// refill it, and empty, which src/lib/backend.ts reads as local-first.
+// Deleting the key instead would let Next load it straight back.
+const { loadEnvConfig } = createRequire(import.meta.url)("@next/env");
+loadEnvConfig(root, false, { info() {}, error: (...a) => console.error(...a) });
+const effectiveUrl = process.env.NEXT_PUBLIC_CONVEX_URL?.trim() || undefined;
+const cloudBundle = process.env.DOODABOO_TAURI_CLOUD === "1";
+const convexUrl = cloudBundle ? effectiveUrl : undefined;
+if (cloudBundle && !convexUrl) fail("DOODABOO_TAURI_CLOUD=1 needs NEXT_PUBLIC_CONVEX_URL (in the environment or a .env file)");
+log(
+  cloudBundle
+    ? `mode: cloud (${convexUrl})`
+    : `mode: local-first${effectiveUrl ? ` (ignoring NEXT_PUBLIC_CONVEX_URL=${effectiveUrl})` : ""}`,
+);
+const childEnv = { ...process.env, DOODABOO_STATIC_EXPORT: "1", NEXT_TELEMETRY_DISABLED: "1" };
+childEnv.NEXT_PUBLIC_CONVEX_URL = cloudBundle ? convexUrl : "";
 // Run Next's own bin under the current node rather than through `npx`:
 // `tauri build` invokes this script on Windows too, where `npx` is a .cmd
 // shim that spawnSync cannot start without a shell (and Node ≥ 20.12 refuses
@@ -143,11 +169,7 @@ const nextBin = createRequire(import.meta.url).resolve("next/dist/bin/next");
 const result = spawnSync(process.execPath, [nextBin, "build"], {
   cwd: root,
   stdio: "inherit",
-  env: {
-    ...process.env,
-    DOODABOO_STATIC_EXPORT: "1",
-    NEXT_TELEMETRY_DISABLED: "1",
-  },
+  env: childEnv,
 });
 restoreOnce();
 
@@ -175,7 +197,7 @@ function validateOut() {
     "posts.html", "posts/view.html", "posts/view.txt", "posts/new.html",
     "posts/lab.html", "posts/insights.html", "posts/compare.html",
     "projects.html", "projects/view.html", "projects/new.html",
-    "tasks/view.html", "playbooks.html", "playbooks/view.html",
+    "tasks/view.html", "playbooks.html", "playbooks/view.html", "join.html",
   ];
   const missing = pages.filter((p) => !existsSync(path.join(out, p)));
   if (missing.length) fail(`export is missing expected page(s): ${missing.join(", ")}`);
@@ -194,5 +216,30 @@ function validateOut() {
 
   const notRestored = SERVER_ONLY.filter((rel) => !existsSync(path.join(root, rel)));
   if (notRestored.length) fail(`server-only path(s) not restored after build: ${notRestored.join(", ")}`);
-  log(`validated ${pages.length} pages, no leaked dynamic/API paths, tree restored`);
+
+  // The bundle must talk to exactly the backend this build was asked for:
+  // a local-first bundle carries no deployment URL, a cloud bundle carries
+  // the one requested (both are inlined into the client chunks).
+  const chunks = path.join(out, "_next", "static");
+  const mentions = (needle) => {
+    let found = false;
+    const scan = (dir) => {
+      for (const name of readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, name.name);
+        if (name.isDirectory()) scan(p);
+        else if (name.name.endsWith(".js") && readFileSync(p, "utf8").includes(needle)) found = true;
+      }
+    };
+    if (existsSync(chunks)) scan(chunks);
+    return found;
+  };
+  // Only the configured URL itself is evidence of a wired-in backend: the
+  // Convex client ships example URLs (happy-animal-123.convex.cloud) in its
+  // error messages, and its chunk is emitted even when it is never loaded.
+  if (cloudBundle) {
+    if (!mentions(convexUrl)) fail(`cloud bundle does not reference ${convexUrl}`);
+  } else if (effectiveUrl && mentions(effectiveUrl)) {
+    fail(`local-first bundle references ${effectiveUrl}; pass DOODABOO_TAURI_CLOUD=1 to build a cloud bundle on purpose`);
+  }
+  log(`validated ${pages.length} pages, no leaked dynamic/API paths, backend: ${cloudBundle ? "cloud" : "local-first"}, tree restored`);
 }

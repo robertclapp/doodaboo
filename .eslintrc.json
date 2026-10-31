@@ -1,5 +1,8 @@
 {
-  "extends": ["next/core-web-vitals", "next/typescript"],
+  "extends": [
+    "next/core-web-vitals",
+    "next/typescript"
+  ],
   "rules": {
     "@typescript-eslint/no-unused-vars": [
       "warn",
@@ -13,5 +16,42 @@
     "react/no-unescaped-entities": "off",
     "react-hooks/exhaustive-deps": "warn"
   },
-  "ignorePatterns": [".next/", "node_modules/", "next-env.d.ts"]
+  "ignorePatterns": [
+    ".next/",
+    "node_modules/",
+    "next-env.d.ts",
+    "convex/_generated/"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "convex/**/*.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@/*"
+                ],
+                "message": "convex/ is bundled by the Convex CLI with convex/tsconfig.json, which has no '@/' alias. Import shared code relatively (../src/lib/...)."
+              },
+              {
+                "group": [
+                  "react",
+                  "react-dom",
+                  "next",
+                  "next/*",
+                  "@/components/*"
+                ],
+                "message": "Convex functions run on the server; UI modules cannot be imported here."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
 }

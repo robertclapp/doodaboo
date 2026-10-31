@@ -60,6 +60,13 @@ export const routes = {
   team: "/team",
   labels: "/labels",
   settings: "/settings",
+  /**
+   * Invite links land here; the cloud runtime redeems the token for the
+   * signed-in account. The token is in the fragment so it never reaches
+   * the web host's request logs.
+   */
+  join: "/join",
+  joinInvite: (token: string): string => `/join#token=${encodeURIComponent(token)}`,
 
   posts: "/posts",
   newPost: "/posts/new",

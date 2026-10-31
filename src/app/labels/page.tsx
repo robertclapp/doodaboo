@@ -23,6 +23,9 @@ export default function LabelsPage() {
   const labels = useStore((s) => s.labels);
   const addLabel = useStore((s) => s.addLabel);
   const removeLabel = useStore((s) => s.removeLabel);
+  // Removing a label rewrites every issue that uses it: owner-only in a
+  // cloud workspace (the server enforces it).
+  const canRemove = useStore((s) => !s.cloud || s.cloud.role === "owner");
   const tasks = useStore((s) => s.tasks);
   const hydrated = useStore((s) => s.hydrated);
   const confirm = useConfirm();
@@ -93,8 +96,9 @@ export default function LabelsPage() {
           </div>
           <ul>
             {labels.map((l) => {
-              const count = tasks.filter((t) => t.labelIds.includes(l.id))
-                .length;
+              const count = tasks.filter((t) =>
+                t.labelIds.includes(l.id),
+              ).length;
               return (
                 <li
                   key={l.id}
@@ -108,24 +112,26 @@ export default function LabelsPage() {
                   <span className="font-mono text-[10px] uppercase tracking-widest text-ink/50">
                     {count} used
                   </span>
-                  <button
-                    onClick={async () => {
-                      const ok = await confirm({
-                        title: "Remove label",
-                        message: `"${l.name}" will be removed from ${count} ${count === 1 ? "task" : "tasks"}.`,
-                        confirmLabel: "Remove label",
-                        destructive: true,
-                      });
-                      if (ok) {
-                        removeLabel(l.id);
-                        toast.success(`Removed ${l.name}`);
-                      }
-                    }}
-                    className="p-1 hover:bg-ink hover:text-paper"
-                    aria-label="Remove"
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                  {canRemove && (
+                    <button
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: "Remove label",
+                          message: `"${l.name}" will be removed from ${count} ${count === 1 ? "task" : "tasks"}.`,
+                          confirmLabel: "Remove label",
+                          destructive: true,
+                        });
+                        if (ok) {
+                          removeLabel(l.id);
+                          toast.success(`Removed ${l.name}`);
+                        }
+                      }}
+                      className="p-1 hover:bg-ink hover:text-paper"
+                      aria-label="Remove"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
                 </li>
               );
             })}

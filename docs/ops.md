@@ -7,7 +7,7 @@ to remember to run it.
 
 | When | Workflow | What it does |
 | --- | --- | --- |
-| Every push / PR | `.github/workflows/ci.yml` | verify (typecheck + lint + unit + web build + `npm run build:tauri`) → `e2e` (against `next start`) and `e2e-export` (against the Tauri static export via `scripts/serve-export.mjs`), each on its own job. Comments failure summaries on the PR. |
+| Every push / PR | `.github/workflows/ci.yml` | verify (typecheck + lint + unit + Convex backend tests + web build + `npm run build:tauri`, then the same two builds in cloud mode) → `e2e` (against `next start`), `e2e-export` (the Tauri static export via `scripts/serve-export.mjs`) and `e2e-cloud-offline` (a cloud build with no deployment), each on its own job. Comments failure summaries on the PR. |
 | Mondays 10:00 UTC, on demand, and on PRs/pushes touching `src-tauri/**` or the export pipeline | `.github/workflows/mobile.yml` | Unsigned Android debug APK (ubuntu-24.04) + unsigned iOS simulator `.app` (macos-latest), uploaded as run artifacts. Opens an `ops:mobile` issue on scheduled failure. |
 | Daily 06:00 UTC | `.github/workflows/scheduled.yml` → `verify` | Full verify + e2e against `main`. Catches dep drift, time-sensitive seeds, Playwright browser-cache misses. Opens an `ops:nightly`-labelled issue on failure (reuses one issue/day rather than spamming). |
 | Mondays 09:00 UTC | `.github/workflows/scheduled.yml` → `tauri-sanity` | `cargo check` for the Tauri crate on Linux / macOS / Windows. Catches Tauri version drift, system-lib breakage on the Linux build agents, Rust toolchain regressions. Opens an `ops:tauri` issue on failure. |

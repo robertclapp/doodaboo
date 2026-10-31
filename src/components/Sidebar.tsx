@@ -6,11 +6,13 @@ import { Suspense, useEffect } from "react";
 import {
   BarChart3,
   BookOpen,
+  Cloud,
   Columns2,
   FlaskConical,
   Inbox,
   LayoutDashboard,
   ListTodo,
+  LogOut,
   FolderKanban,
   Users,
   Plus,
@@ -127,6 +129,7 @@ export function Sidebar({
   }, [pathname]);
   const projects = useStore((s) => s.projects);
   const tasks = useStore((s) => s.tasks);
+  const cloud = useStore((s) => s.cloud);
   const currentUser = useStore((s) =>
     s.users.find((u) => u.id === s.currentUserId),
   );
@@ -198,6 +201,40 @@ export function Sidebar({
               @{currentUser.handle}
             </div>
           </div>
+        </div>
+      )}
+
+      {cloud && (
+        <div
+          className="border-b-[1.5px] border-ink px-3 py-2 flex items-center gap-2"
+          data-testid="cloud-account"
+        >
+          <Cloud size={12} className="shrink-0 text-ink/60" />
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-semibold truncate" title={cloud.workspaceName}>
+              {cloud.workspaceName}
+            </div>
+            <div className="font-mono text-[10px] uppercase tracking-wider text-ink/50 truncate">
+              {cloud.role} · {cloud.account.email ?? "signed in"}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={cloud.switchWorkspace}
+            className="font-mono text-[9px] uppercase tracking-widest text-ink/50 hover:text-ink"
+            title="Switch workspace"
+          >
+            switch
+          </button>
+          <button
+            type="button"
+            onClick={() => void cloud.signOut()}
+            className="p-1 hover:bg-ink hover:text-paper transition-colors"
+            aria-label="Sign out"
+            title="Sign out"
+          >
+            <LogOut size={12} />
+          </button>
         </div>
       )}
 

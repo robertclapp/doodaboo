@@ -74,7 +74,9 @@ npm run dev
 | `npm run lint` | `next lint` (ESLint 8). |
 | `npm run format` | Prettier write across `src/`. |
 | `npm run verify` | Typecheck + lint + tests in one shot. |
-| `npm run e2e` | Playwright E2E suite (auto-spins a `next start` server). With `E2E_TARGET=export` it runs against the Tauri bundle instead. |
+| `npm run e2e` | Playwright E2E suite (auto-spins a `next start` server). With `E2E_TARGET=export` it runs against the Tauri bundle; with `E2E_TARGET=cloud-offline` it runs the cloud-shell spec against a build pointed at an unreachable deployment. |
+| `npm run test:convex` | Convex backend tests (convex-test + vitest), no deployment needed. |
+| `npm run convex:codegen:offline` | Regenerate `convex/_generated/` without a deployment. |
 | `npm run e2e:install` | One-time browser binary install. |
 | `npm run e2e:ui` | Open the Playwright UI runner. |
 | `npm run e2e:report` | Open the last HTML report. |
@@ -129,6 +131,7 @@ serves the same policy.
 | `NEXT_PUBLIC_SITE_URL` | recommended | Used by `app/sitemap.ts`, `app/robots.ts`, `app/manifest.ts`, and `metadataBase`. Defaults let previews work unconfigured. |
 | `NEXT_PUBLIC_DEMO_POSTS` | no | Set to `false` so fresh workspaces start with an empty Posts surface (see Roadmap → Done). Build-time flag. |
 | `DOODABOO_VAULT` | no | Server-side vault path for the HTTP API's persistence. Only needed if you use the API as a backend; the web app itself is localStorage-first. |
+| `NEXT_PUBLIC_CONVEX_URL` | no | Set to a Convex deployment URL to build the app in **cloud mode**: accounts, shared workspaces, live sync. Unset, the app is local-first. Build-time flag; see [docs/cloud.md](docs/cloud.md). |
 | `DOODABOO_API_TOKEN` | **yes in production** | Bearer token for the HTTP API. Every `/api/*` route except `/api/health` requires it. **Without it a production deployment refuses all API requests with 503** — the routes read and write the entire workspace, so an unauthenticated public URL would expose it. Unset locally, the API stays open for dev, tests, and `doodaboo serve` on `127.0.0.1`. See [docs/api.md](docs/api.md#authentication). |
 
 ### Railway
@@ -194,6 +197,10 @@ persistence doesn't apply there — the web app runs localStorage-first.
 | Persistent store | `src/lib/store.ts` (zustand + localStorage) |
 | Seed data | `src/lib/seed.ts` (deterministic, SSR-safe) |
 | Routes | `src/lib/routes.ts` — every record-detail URL is built here |
+| Op protocol | `src/lib/ops.ts` — cloud edits as replayable ops over the pure mutations |
+| Backend mode | `src/lib/backend.ts` — local-first vs cloud, decided per build |
+| Cloud runtime | `src/components/cloud/` — sign-in, workspace sync, members (cloud builds only) |
+| Convex backend | `convex/` — schema, auth, workspace/members functions, tests |
 | Scoring engine | `src/lib/virality.ts` |
 | Playbooks | `src/lib/playbooks.ts` |
 | Theme | `src/lib/store.ts` (`Theme` type) + `src/app/globals.css` |
@@ -292,11 +299,16 @@ sorting, and threshold projection monotonicity.
   (`src/lib/tauri-storage.ts`), so the app reads/writes the on-disk
   vault directly.
 
+- **Cloud mode: accounts, shared workspaces, live sync** — a Convex
+  backend (`convex/`) with email + password auth, invite links, owner /
+  member roles, and server-replayed ops so every business rule stays in
+  `src/lib/mutations.ts`. Opt in per build with `NEXT_PUBLIC_CONVEX_URL`;
+  local-first stays the default. See [docs/cloud.md](docs/cloud.md).
+
 ### Planned
 
-- Real backend (Supabase or Convex) so workspaces sync across devices.
-- Auth.
-- Real-time collaboration.
+- OAuth providers (GitHub, Google) for cloud sign-in.
+- Per-collection sync queries for very large workspaces.
 - Replace heuristic scoring with a fine-tuned model fed by historical
   post telemetry.
 

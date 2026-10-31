@@ -5,6 +5,14 @@ const BASE_URL = process.env.E2E_BASE_URL ?? `http://localhost:${PORT}`;
 const isCI = !!process.env.CI;
 /** E2E_TARGET=export runs the suite against the Tauri static bundle in ./out. */
 const isExport = process.env.E2E_TARGET === "export";
+/**
+ * E2E_TARGET=cloud-offline runs only e2e/cloud-offline.spec.ts against a
+ * web build made with an unreachable NEXT_PUBLIC_CONVEX_URL: it proves the
+ * cloud shell renders, the connection banner tells the truth, the device's
+ * local workspace is never touched, and the local escape hatch works — all
+ * without a deployment. The rest of the suite assumes local mode.
+ */
+const isCloudOffline = process.env.E2E_TARGET === "cloud-offline";
 
 /**
  * Playwright config — run against a production build of the app so we
@@ -14,6 +22,8 @@ const isExport = process.env.E2E_TARGET === "export";
  */
 export default defineConfig({
   testDir: "./e2e",
+  testMatch: isCloudOffline ? "**/cloud-offline.spec.ts" : undefined,
+  testIgnore: isCloudOffline ? [] : ["**/cloud-offline.spec.ts"],
   fullyParallel: true,
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,

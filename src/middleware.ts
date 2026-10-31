@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { authorizeApiRequest } from "@/lib/api-auth";
+import { isCloudBuild } from "@/lib/backend";
 
 /**
  * Single choke point for HTTP API authorization.
@@ -21,6 +22,7 @@ export function middleware(req: NextRequest): NextResponse {
     isProduction: process.env.NODE_ENV === "production",
     // Set only by `doodaboo serve` when bound to loopback (cli/commands/serve.ts).
     localServe: process.env.DOODABOO_API_LOCAL === "1",
+    cloudMode: isCloudBuild(),
   });
 
   if (decision.ok) return NextResponse.next();

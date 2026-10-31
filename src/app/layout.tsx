@@ -1,8 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AppShell } from "@/components/AppShell";
+import { CloudProvider } from "@/components/CloudProvider";
 import { StoreHydration } from "@/components/StoreHydration";
 import { ThemeManager } from "@/components/ThemeManager";
+import { ToastProvider } from "@/components/ToastProvider";
+import { CLOUD_PREFS_KEY, isCloudBuild, MODE_KEY } from "@/lib/backend";
 
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://doodaboo.example.com";
@@ -82,7 +85,10 @@ export const viewport: Viewport = {
 
 // Read the persisted theme preference and set the data-theme attribute
 // before React mounts so dark-mode users don't see a light-mode flash.
-const themeBootstrap = `(function(){try{var raw=localStorage.getItem('doodaboo-v1');var t='system';if(raw){var p=JSON.parse(raw).state;if(p&&p.theme)t=p.theme;}var resolved=t==='system'?(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t;document.documentElement.dataset.theme=resolved;}catch(e){}})();`;
+// Local mode keeps the theme inside the workspace record (`doodaboo-v1`);
+// cloud mode keeps only preferences, under their own key — unless the
+// device overrides a cloud build back to local (src/lib/backend.ts).
+const themeBootstrap = `(function(){try{var cloud=${isCloudBuild() ? "true" : "false"}&&localStorage.getItem(${JSON.stringify(MODE_KEY)})!=='local';var raw=localStorage.getItem(cloud?${JSON.stringify(CLOUD_PREFS_KEY)}:'doodaboo-v1');var t='system';if(raw){var p=JSON.parse(raw).state;if(p&&p.theme)t=p.theme;}var resolved=t==='system'?(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t;document.documentElement.dataset.theme=resolved;}catch(e){}})();`;
 
 export default function RootLayout({
   children,
@@ -97,7 +103,11 @@ export default function RootLayout({
       <body className="min-h-screen bg-paper text-ink antialiased">
         <StoreHydration />
         <ThemeManager />
-        <AppShell>{children}</AppShell>
+        <ToastProvider>
+          <CloudProvider>
+            <AppShell>{children}</AppShell>
+          </CloudProvider>
+        </ToastProvider>
       </body>
     </html>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import dynamic from "next/dynamic";
 import {
   Download,
   Eraser,
@@ -15,9 +16,18 @@ import { Button } from "@/components/ui/Button";
 import { useStore } from "@/lib/store";
 import { Theme } from "@/lib/store";
 import { useConfirm, useToast } from "@/components/ToastProvider";
+import { cloud as cloudConfig, isCloudBuild, localOverride, setLocalOverride } from "@/lib/backend";
+
+// Cloud mode: account, workspace membership, import-to-cloud and the
+// device-level mode switch live in a chunk only cloud builds download.
+const SettingsCloud = dynamic(
+  () => import("@/components/cloud/SettingsCloud"),
+  { ssr: false },
+);
 
 export default function SettingsPage() {
   const hydrated = useStore((s) => s.hydrated);
+  const cloud = useStore((s) => s.cloud);
   const theme = useStore((s) => s.theme);
   const setTheme = useStore((s) => s.setTheme);
   const resetToSeed = useStore((s) => s.resetToSeed);
@@ -75,9 +85,7 @@ export default function SettingsPage() {
       importState(payload);
       toast.success("Workspace imported");
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Import failed",
-      );
+      toast.error(err instanceof Error ? err.message : "Import failed");
     }
   };
 
@@ -168,69 +176,80 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        <section className="col-span-12 lg:col-span-6 border-[1.5px] border-ink bg-paper">
-          <Header>Import</Header>
-          <div className="p-4 space-y-3">
-            <p className="text-sm text-ink/70">
-              Restore from a <span className="font-mono">doodaboo</span> export.
-              This replaces the current workspace.
-            </p>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="application/json"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void handleImport(f);
-                e.target.value = "";
-              }}
-            />
-            <Button
-              variant="outline"
-              iconLeft={<Upload size={12} />}
-              onClick={() => fileRef.current?.click()}
-            >
-              Choose JSON file
-            </Button>
-          </div>
-        </section>
+        {cloud ? (
+          <SettingsCloud />
+        ) : (
+          <>
+            <CloudModeSection />
+            <section className="col-span-12 lg:col-span-6 border-[1.5px] border-ink bg-paper">
+              <Header>Import</Header>
+              <div className="p-4 space-y-3">
+                <p className="text-sm text-ink/70">
+                  Restore from a <span className="font-mono">doodaboo</span>{" "}
+                  export. This replaces the current workspace.
+                </p>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="application/json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void handleImport(f);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  iconLeft={<Upload size={12} />}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  Choose JSON file
+                </Button>
+              </div>
+            </section>
 
-        <section className="col-span-12 border-[1.5px] border-ink bg-paper">
-          <Header>Danger zone</Header>
-          <div className="p-4 flex items-center justify-between gap-4 flex-wrap border-b-[1.5px] border-ink/10">
-            <div>
-              <div className="text-sm font-semibold">Reset to demo data</div>
-              <div className="text-xs text-ink/60">
-                Replaces everything with the built-in seed workspace. Useful when
-                demoing.
+            <section className="col-span-12 border-[1.5px] border-ink bg-paper">
+              <Header>Danger zone</Header>
+              <div className="p-4 flex items-center justify-between gap-4 flex-wrap border-b-[1.5px] border-ink/10">
+                <div>
+                  <div className="text-sm font-semibold">
+                    Reset to demo data
+                  </div>
+                  <div className="text-xs text-ink/60">
+                    Replaces everything with the built-in seed workspace. Useful
+                    when demoing.
+                  </div>
+                </div>
+                <Button
+                  variant="danger"
+                  iconLeft={<RotateCcw size={12} />}
+                  onClick={handleReset}
+                >
+                  Reset workspace
+                </Button>
               </div>
-            </div>
-            <Button
-              variant="danger"
-              iconLeft={<RotateCcw size={12} />}
-              onClick={handleReset}
-            >
-              Reset workspace
-            </Button>
-          </div>
-          <div className="p-4 flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <div className="text-sm font-semibold">Start blank workspace</div>
-              <div className="text-xs text-ink/60">
-                Deletes everything — no demo content, just you. The starting
-                point for real work.
+              <div className="p-4 flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <div className="text-sm font-semibold">
+                    Start blank workspace
+                  </div>
+                  <div className="text-xs text-ink/60">
+                    Deletes everything — no demo content, just you. The starting
+                    point for real work.
+                  </div>
+                </div>
+                <Button
+                  variant="danger"
+                  iconLeft={<Eraser size={12} />}
+                  onClick={handleStartBlank}
+                >
+                  Start blank
+                </Button>
               </div>
-            </div>
-            <Button
-              variant="danger"
-              iconLeft={<Eraser size={12} />}
-              onClick={handleStartBlank}
-            >
-              Start blank
-            </Button>
-          </div>
-        </section>
+            </section>
+          </>
+        )}
       </div>
     </>
   );
@@ -287,5 +306,50 @@ function Stat({ label, value }: { label: string; value: number }) {
         {value}
       </div>
     </div>
+  );
+}
+
+/**
+ * Local-mode Settings on a build that knows about the cloud: either this
+ * device chose "Work locally" (offer the way back), or the configured
+ * deployment URL was rejected at boot (say why, so the operator can fix it).
+ * Renders nothing on a plain local-first build.
+ */
+function CloudModeSection() {
+  if (cloudConfig.error) {
+    return (
+      <section className="col-span-12 border-[1.5px] border-ink bg-paper" data-testid="cloud-config-error">
+        <Header>Cloud</Header>
+        <div className="p-4 space-y-2 text-sm">
+          <p className="font-semibold">This build was given a deployment URL it cannot use, so it runs local-first.</p>
+          <p className="font-mono text-xs text-ink/70 break-all">{cloudConfig.error}</p>
+          <p className="text-xs text-ink/60">Fix NEXT_PUBLIC_CONVEX_URL and rebuild. See docs/cloud.md.</p>
+        </div>
+      </section>
+    );
+  }
+  if (!isCloudBuild() || !localOverride()) return null;
+  return (
+    <section className="col-span-12 border-[1.5px] border-ink bg-paper" data-testid="cloud-mode-local">
+      <Header>Cloud</Header>
+      <div className="p-4 flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <div className="text-sm font-semibold">This device is working locally</div>
+          <div className="text-xs text-ink/60">
+            You chose to use this device&apos;s own workspace instead of the cloud. Nothing here is uploaded when you
+            switch back.
+          </div>
+        </div>
+        <Button
+          variant="accent"
+          onClick={() => {
+            setLocalOverride(false);
+            window.location.replace(window.location.href);
+          }}
+        >
+          Use the cloud workspace again
+        </Button>
+      </div>
+    </section>
   );
 }

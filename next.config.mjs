@@ -11,6 +11,28 @@
 const isStaticExport = process.env.DOODABOO_STATIC_EXPORT === "1";
 
 /**
+ * A set but unusable NEXT_PUBLIC_CONVEX_URL would otherwise ship a silently
+ * local-first app (src/lib/backend.ts rejects it at boot). Fail the build
+ * instead, with the same rules: an http(s) URL, not the .convex.site host.
+ */
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL?.trim();
+if (convexUrl) {
+  let usable = false;
+  try {
+    const url = new URL(convexUrl);
+    usable = (url.protocol === "https:" || url.protocol === "http:") && !url.hostname.endsWith(".convex.site");
+  } catch {
+    usable = false;
+  }
+  if (!usable) {
+    throw new Error(
+      `NEXT_PUBLIC_CONVEX_URL=${JSON.stringify(convexUrl)} is not a usable Convex deployment URL ` +
+        "(expected https://<deployment>.convex.cloud). Fix it, or unset it for a local-first build.",
+    );
+  }
+}
+
+/**
  * Id shapes, duplicated from src/lib/routes.ts ID_PATTERNS because this file
  * cannot import TypeScript. src/lib/routes.test.ts imports this config and
  * asserts each redirect embeds the matching ID_PATTERNS entry, and
@@ -26,6 +48,10 @@ const ID = {
 
 const nextConfig = {
   reactStrictMode: true,
+
+  // `next lint` only scans app/pages/components/lib/src by default; the
+  // backend, CLI, scripts and E2E suites should see the same rules.
+  eslint: { dirs: ["src", "convex", "cli", "scripts", "e2e"] },
 
   ...(isStaticExport
     ? {
