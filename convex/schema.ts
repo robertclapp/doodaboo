@@ -14,9 +14,13 @@ import { labelDoc, postDoc, projectDoc, taskDoc } from "./validators";
  * mutation layer run unmodified on the server (see src/lib/ops.ts).
  *
  * Authorization is membership: every function that touches a workspace
- * re-reads `members` for the caller, so removing someone takes effect on
- * their next call regardless of token lifetime. `members.role` is the single
- * source of truth for ownership — never mirror it into the JWT.
+ * re-reads `members` for the caller, so removing someone ends their access
+ * on their next call regardless of token lifetime. (An invite link is a
+ * bearer credential: a removed person who is handed a link someone else
+ * made can use it like anyone else; owners revoke pending links on the Team
+ * page. Links the removed person made themselves die with their removal.)
+ * `members.role` is the single source of truth for ownership — never mirror
+ * it into the JWT.
  */
 export default defineSchema({
   ...authTables,
@@ -63,7 +67,9 @@ export default defineSchema({
     acceptedAt: v.optional(v.string()),
   })
     .index("by_token", ["token"])
-    .index("by_workspace", ["workspaceId"]),
+    .index("by_workspace", ["workspaceId"])
+    .index("by_workspace_inviter", ["workspaceId", "invitedBy"])
+    .index("by_expiresAt", ["expiresAt"]),
 
   labels: defineTable({ workspaceId: v.id("workspaces"), ...labelDoc })
     .index("by_workspace", ["workspaceId"])

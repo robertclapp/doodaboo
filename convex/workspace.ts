@@ -1,5 +1,6 @@
 import { getDocumentSize, v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import {
@@ -145,8 +146,17 @@ async function trashLookup(ctx: MutationCtx, workspaceId: Id<"workspaces">, op: 
   return NO_TRASH;
 }
 
-/** One delete may move at most this much into the trash, to stay well inside one transaction's write limit. */
-const DELETE_MAX_BYTES = 6 * 1024 * 1024;
+/**
+ * One delete moves a project and all its issues into the trash in one
+ * transaction, and its Undo moves them back in one. Convex allows 16 MiB
+ * read, 16 MiB / 16,000 documents written and 4,096 queries per
+ * transaction. Each issue costs two writes either way (delete + trash
+ * insert, or insert + trash delete) and is read twice (loaded, then
+ * re-read by its delete); the query count is constant. These caps keep
+ * both directions well inside every limit.
+ */
+const DELETE_MAX_BYTES = 5 * 1024 * 1024;
+export const DELETE_MAX_RECORDS = 3000;
 
 function validateSeed(seed: { ids: string[]; now: string }): { ids: string[]; now: string } {
   if (seed.ids.length > SEED_IDS * 2) fail("Validation", "Too many seed ids");
@@ -218,6 +228,12 @@ async function checkBeforeReplay(
       // The project and every issue in it move to the trash in this one
       // transaction; refuse a delete that could not fit rather than fail
       // with a platform error.
+      if (docs.tasks.length > DELETE_MAX_RECORDS) {
+        fail(
+          "Validation",
+          `This project has ${docs.tasks.length} issues; one delete can move at most ${DELETE_MAX_RECORDS}. Delete some of its issues first.`,
+        );
+      }
       const bytes = docs.tasks.reduce((n, d) => n + getDocumentSize(d as never), 0);
       if (bytes > DELETE_MAX_BYTES) {
         fail(
@@ -262,12 +278,15 @@ async function stash(
   deletedAt: string,
 ) {
   const put = async (kind: "project" | "task" | "post", id: string, snapshot: unknown, group?: string) => {
-    // A row with this id cannot normally exist (ids in the trash are
-    // reserved); replace defensively rather than keep two.
-    const existing = await trashRow(ctx, workspaceId, kind, id);
-    if (existing) await ctx.db.delete(existing._id);
     await ctx.db.insert("trash", { workspaceId, kind, id, snapshot, deletedAt, deletedBy, ...(group ? { group } : {}) });
   };
+  // A row with the deleted record's id cannot normally exist (ids in the
+  // trash are reserved); replace defensively rather than keep two. Only the
+  // top-level record is checked: one query, not one per cascaded issue, so a
+  // project delete stays at a constant number of queries.
+  const topId = deleted.kind === "project" ? deleted.snapshot.project.id : deleted.snapshot.id;
+  const existing = await trashRow(ctx, workspaceId, deleted.kind, topId);
+  if (existing) await ctx.db.delete(existing._id);
   if (deleted.kind === "project") {
     const { project, tasks } = deleted.snapshot;
     await put("project", project.id, project);
@@ -365,16 +384,80 @@ async function insertContent(ctx: MutationCtx, workspaceId: Id<"workspaces">, co
   for (const p of content.posts) await ctx.db.insert("posts", { ...p, workspaceId });
 }
 
-async function deleteContent(ctx: MutationCtx, workspaceId: Id<"workspaces">) {
+/**
+ * Everything a workspace holds, for replaceContent: read once, measured,
+ * then deleted. Convex counts a delete as reading the document again, so a
+ * replacement costs twice the existing content in reads (plus the import's
+ * writes); refuse one that would not fit rather than fail mid-way.
+ */
+const REPLACE_MAX_EXISTING_BYTES = 3 * 1024 * 1024;
+
+async function replaceExistingContent(ctx: MutationCtx, workspaceId: Id<"workspaces">) {
+  const docs: Id<"labels" | "projects" | "tasks" | "posts" | "trash">[] = [];
+  let bytes = 0;
   for (const table of ["labels", "projects", "tasks", "posts"] as const) {
-    for (const d of await loadDocs(ctx, table, workspaceId, "all")) await ctx.db.delete(d._id);
+    for (const d of await loadDocs(ctx, table, workspaceId, "all")) {
+      bytes += getDocumentSize(d as never);
+      docs.push(d._id);
+    }
   }
-  const trash = await ctx.db
+  for (const d of await ctx.db
     .query("trash")
     .withIndex("by_workspace_kind_id", (q) => q.eq("workspaceId", workspaceId))
-    .collect();
-  for (const d of trash) await ctx.db.delete(d._id);
+    .collect()) {
+    bytes += getDocumentSize(d as never);
+    docs.push(d._id);
+  }
+  if (bytes > REPLACE_MAX_EXISTING_BYTES) {
+    fail(
+      "Validation",
+      `This workspace already holds ${(bytes / 1024 / 1024).toFixed(1)} MB, too much to replace in one step. Create a new workspace from the export instead (and delete this one if you no longer need it).`,
+    );
+  }
+  for (const id of docs) await ctx.db.delete(id);
 }
+
+/** Bytes one background deletion pass may touch (each delete re-reads its document). */
+const DELETE_PASS_MAX_BYTES = 6 * 1024 * 1024;
+const DELETE_PASS_MAX_DOCS = 2000;
+
+/**
+ * Background cleanup after deleteWorkspace: the workspace and its
+ * memberships are already gone, so nobody can reach this content; delete it
+ * in budgeted passes, scheduling the next until nothing is left.
+ */
+export const deleteWorkspaceContent = internalMutation({
+  args: { workspaceId: v.id("workspaces") },
+  handler: async (ctx, { workspaceId }) => {
+    let bytes = 0;
+    let count = 0;
+    let more = false;
+    const scan = async <T extends "labels" | "projects" | "tasks" | "posts" | "trash">(table: T) => {
+      const q =
+        table === "trash"
+          ? ctx.db.query("trash").withIndex("by_workspace_kind_id", (r) => r.eq("workspaceId", workspaceId))
+          : ctx.db.query(table as "tasks").withIndex("by_workspace", (r) => r.eq("workspaceId", workspaceId));
+      const doomed: Id<T>[] = [];
+      for await (const d of q as AsyncIterable<{ _id: Id<T> }>) {
+        const size = getDocumentSize(d as never);
+        if (count >= DELETE_PASS_MAX_DOCS || bytes + 2 * size > DELETE_PASS_MAX_BYTES) {
+          more = true;
+          break;
+        }
+        bytes += 2 * size;
+        count++;
+        doomed.push(d._id);
+      }
+      for (const id of doomed) await ctx.db.delete(id);
+    };
+    for (const table of ["tasks", "posts", "projects", "labels", "trash"] as const) {
+      if (more) break;
+      await scan(table);
+    }
+    if (more) await ctx.scheduler.runAfter(0, internal.workspace.deleteWorkspaceContent, { workspaceId });
+    return count;
+  },
+});
 
 const contentArgs = {
   content: v.optional(contentValidator),
@@ -417,7 +500,7 @@ export const replaceContent = mutation({
     requireOwner(member);
     checkContent(content);
     const { members } = await loadMembers(ctx, workspaceId);
-    await deleteContent(ctx, workspaceId);
+    await replaceExistingContent(ctx, workspaceId);
     await insertContent(
       ctx,
       workspaceId,
@@ -426,11 +509,15 @@ export const replaceContent = mutation({
   },
 });
 
+/**
+ * Delete a workspace. Access ends in this transaction (memberships,
+ * invites and the workspace itself go now); the content, however large, is
+ * deleted in the background by deleteWorkspaceContent.
+ */
 export const deleteWorkspace = mutation({
   args: { workspaceId: v.id("workspaces") },
   handler: async (ctx, { workspaceId }) => {
     requireOwner(await requireMember(ctx, workspaceId));
-    await deleteContent(ctx, workspaceId);
     for (const m of await ctx.db.query("members").withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId)).collect()) {
       await ctx.db.delete(m._id);
     }
@@ -438,20 +525,43 @@ export const deleteWorkspace = mutation({
       await ctx.db.delete(i._id);
     }
     await ctx.db.delete(workspaceId);
+    await ctx.scheduler.runAfter(0, internal.workspace.deleteWorkspaceContent, { workspaceId });
   },
 });
 
-/** Called by crons.ts: drop trash older than TRASH_TTL_DAYS. */
+/**
+ * One purge pass reads at most this much. Convex fails a function past
+ * 16 MiB / 32,000 documents read, and a delete re-reads its document, so
+ * every row is counted twice.
+ */
+const PURGE_MAX_BYTES = 6 * 1024 * 1024;
+const PURGE_MAX_DOCS = 2000;
+
+/**
+ * Called by crons.ts: drop trash older than TRASH_TTL_DAYS. Each pass
+ * reads against a byte and document budget (rows can hold whole records),
+ * and if stale rows remain it schedules the next pass right away, so a
+ * backlog drains in minutes instead of one fixed batch per day.
+ */
 export const purgeTrash = internalMutation({
   args: {},
   handler: async (ctx) => {
     const cutoff = new Date(Date.now() - TRASH_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    const stale = await ctx.db
-      .query("trash")
-      .withIndex("by_deletedAt", (q) => q.lt("deletedAt", cutoff))
-      .take(500);
-    for (const d of stale) await ctx.db.delete(d._id);
-    return stale.length;
+    const doomed: Id<"trash">[] = [];
+    let bytes = 0;
+    let more = false;
+    for await (const d of ctx.db.query("trash").withIndex("by_deletedAt", (q) => q.lt("deletedAt", cutoff))) {
+      const size = getDocumentSize(d as never);
+      if (doomed.length >= PURGE_MAX_DOCS || bytes + 2 * size > PURGE_MAX_BYTES) {
+        more = true;
+        break;
+      }
+      bytes += 2 * size;
+      doomed.push(d._id);
+    }
+    for (const id of doomed) await ctx.db.delete(id);
+    if (more) await ctx.scheduler.runAfter(0, internal.workspace.purgeTrash, {});
+    return doomed.length;
   },
 });
 

@@ -1,5 +1,6 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import {
@@ -52,6 +53,13 @@ export const invite = mutation({
   handler: async (ctx, { workspaceId, email }) => {
     const member = await requireMember(ctx, workspaceId);
     requireOwner(member);
+    const now = nowIso();
+    const pending = (
+      await ctx.db.query("invites").withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId)).collect()
+    ).filter((i) => !i.acceptedBy && i.expiresAt > now).length;
+    if (pending >= MAX_PENDING_INVITES) {
+      fail("Validation", `This workspace already has ${pending} open invites; revoke some before creating more.`);
+    }
     const token = randomToken();
     const createdAt = nowIso();
     const expiresAt = new Date(Date.parse(createdAt) + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -88,6 +96,9 @@ export const listInvites = query({
     const out = [];
     for (const i of invites) {
       if (i.acceptedBy || i.expiresAt <= now) continue;
+      // Show only links that would actually work (see usableInvite).
+      const maker = await findMembership(ctx, workspaceId, i.invitedBy);
+      if (!maker || maker.role !== "owner") continue;
       const by = await ctx.db.get(i.invitedBy);
       out.push({
         id: i._id,
@@ -116,14 +127,36 @@ async function usableInvite(ctx: QueryCtx | MutationCtx, token: string) {
   return { invite, workspace };
 }
 
-/** Delete the pending invites a person made in a workspace. */
+/** Delete the invites a person made in a workspace (reads only theirs). */
 async function revokeInvitesBy(ctx: MutationCtx, workspaceId: Id<"workspaces">, userId: Id<"users">) {
   const invites = await ctx.db
     .query("invites")
-    .withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId))
+    .withIndex("by_workspace_inviter", (q) => q.eq("workspaceId", workspaceId).eq("invitedBy", userId))
     .collect();
-  for (const i of invites) if (!i.acceptedBy && i.invitedBy === userId) await ctx.db.delete(i._id);
+  for (const i of invites) await ctx.db.delete(i._id);
 }
+
+/** Pending links per workspace; plenty for real use, and it bounds every invite scan. */
+export const MAX_PENDING_INVITES = 50;
+
+/**
+ * Called by crons.ts: delete invites past their expiry, used or not. Nothing
+ * reads an invite after that, and purging keeps every per-workspace invite
+ * scan small. Budgeted per pass and self-continuing, like purgeTrash.
+ */
+export const purgeInvites = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = nowIso();
+    const doomed = await ctx.db
+      .query("invites")
+      .withIndex("by_expiresAt", (q) => q.lt("expiresAt", now))
+      .take(1000);
+    for (const i of doomed) await ctx.db.delete(i._id);
+    if (doomed.length === 1000) await ctx.scheduler.runAfter(0, internal.members.purgeInvites, {});
+    return doomed.length;
+  },
+});
 
 export const revokeInvite = mutation({
   args: { inviteId: v.id("invites") },
@@ -145,7 +178,16 @@ export const peekInvite = query({
   handler: async (ctx, { token }) => {
     const userId = await requireUserId(ctx);
     const found = await usableInvite(ctx, token);
-    if (!found) return null;
+    if (!found) {
+      // The person who just redeemed this link (or reopens it later) sees
+      // their workspace, not "no longer valid".
+      const used = await ctx.db.query("invites").withIndex("by_token", (q) => q.eq("token", token)).unique();
+      if (used && used.acceptedBy === userId && (await findMembership(ctx, used.workspaceId, userId))) {
+        const workspace = await ctx.db.get(used.workspaceId);
+        if (workspace) return { workspaceId: workspace._id, name: workspace.name, alreadyMember: true };
+      }
+      return null;
+    }
     const alreadyMember = !!(await findMembership(ctx, found.workspace._id, userId));
     return { workspaceId: found.workspace._id, name: found.workspace.name, alreadyMember };
   },

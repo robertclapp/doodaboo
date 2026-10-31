@@ -418,14 +418,21 @@ export async function writeDiff<T extends Table>(
     }
     const problem = checkRecord(table, record as Label | Project | Task | Post);
     if (problem) fail("Validation", problem);
-    const clash = await findByAppId(ctx, table, workspaceId, id);
-    if (clash) fail("Conflict", `A ${table.slice(0, -1)} with id ${id} already exists`);
-    // A deleted record's id stays reserved while it can still be restored;
-    // otherwise a new record could take it and turn the next Undo into a
-    // silent no-op that also discards the snapshot.
-    if (table !== "labels" && !opts.restoring?.has(id)) {
-      const reserved = await trashRow(ctx, workspaceId, TRASH_KIND[table as "projects" | "tasks" | "posts"], id);
-      if (reserved) fail("Conflict", `The id ${id} belongs to a deleted ${table.slice(0, -1)} that can still be restored`);
+    // Ids a restore brings back are known to be free: they were reserved by
+    // their trash rows the whole time they were deleted (and the restore op
+    // checks its own id up front). Skipping the per-record lookups keeps a
+    // project restore at a constant number of queries however many issues
+    // it holds — Convex allows 4,096 per transaction.
+    if (!opts.restoring?.has(id)) {
+      const clash = await findByAppId(ctx, table, workspaceId, id);
+      if (clash) fail("Conflict", `A ${table.slice(0, -1)} with id ${id} already exists`);
+      // A deleted record's id stays reserved while it can still be restored;
+      // otherwise a new record could take it and turn the next Undo into a
+      // silent no-op that also discards the snapshot.
+      if (table !== "labels") {
+        const reserved = await trashRow(ctx, workspaceId, TRASH_KIND[table as "projects" | "tasks" | "posts"], id);
+        if (reserved) fail("Conflict", `The id ${id} belongs to a deleted ${table.slice(0, -1)} that can still be restored`);
+      }
     }
     await ctx.db.insert(table, { ...record, workspaceId } as never);
     inserted++;

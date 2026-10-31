@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ConvexError } from "convex/values";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
+import { MAX_PENDING_INVITES } from "./members";
 import { as, fresh, seed, signUp, workspaceFor } from "./test.helpers";
 import type { WorkspaceView } from "./workspace";
 import type { Project, Task } from "../src/lib/types";
@@ -91,7 +92,9 @@ describe("invites", () => {
     // The email on the invite is informational: Bob can use Alice's link.
     expect(await as(t, bob).mutation(api.members.acceptInvite, { token })).toBe(ws);
     expect(await errorCode(as(t, alice).mutation(api.members.acceptInvite, { token }))).toBe("NotFound");
-    expect(await as(t, bob).query(api.members.peekInvite, { token })).toBeNull();
+    // Used up: nobody else can see it; Bob, who used it, is shown his workspace.
+    expect(await as(t, alice).query(api.members.peekInvite, { token })).toBeNull();
+    expect(await as(t, bob).query(api.members.peekInvite, { token })).toMatchObject({ alreadyMember: true });
 
     const list = await as(t, owner).query(api.members.list, { workspaceId: ws });
     expect(list!.map((m) => [m.id, m.role]).sort()).toEqual([[owner.userId, "owner"], [bob.userId, "member"]].sort());
@@ -181,6 +184,43 @@ describe("invites", () => {
     });
     expect(await as(t, c).query(api.members.peekInvite, { token })).toBeNull();
     expect(await errorCode(as(t, c).mutation(api.members.acceptInvite, { token }))).toBe("NotFound");
+    // And the new owner is not shown a link that would not work.
+    expect(await as(t, b).query(api.members.listInvites, { workspaceId: ws })).toEqual([]);
+  });
+
+  it("the person who redeemed a link sees their workspace when they open it again", async () => {
+    const t = fresh();
+    const owner = await signUp(t, "owner@example.com");
+    const joiner = await signUp(t, "joiner@example.com");
+    const ws = await workspaceFor(t, owner);
+    const { token } = (await as(t, owner).mutation(api.members.invite, { workspaceId: ws })) as { token: string };
+    await as(t, joiner).mutation(api.members.acceptInvite, { token });
+    expect(await as(t, joiner).query(api.members.peekInvite, { token })).toMatchObject({ workspaceId: ws, alreadyMember: true });
+    const other = await signUp(t, "other@example.com");
+    expect(await as(t, other).query(api.members.peekInvite, { token })).toBeNull();
+  });
+
+  it(`caps open invites at ${MAX_PENDING_INVITES} per workspace`, async () => {
+    const t = fresh();
+    const owner = await signUp(t, "owner@example.com");
+    const ws = await workspaceFor(t, owner);
+    for (let i = 0; i < MAX_PENDING_INVITES; i++) await as(t, owner).mutation(api.members.invite, { workspaceId: ws });
+    expect(await errorCode(as(t, owner).mutation(api.members.invite, { workspaceId: ws }))).toBe("Validation");
+  });
+
+  it("purgeInvites deletes invites past their expiry, used or not, and keeps live ones", async () => {
+    const t = fresh();
+    const owner = await signUp(t, "owner@example.com");
+    const ws = await workspaceFor(t, owner);
+    const old = (await as(t, owner).mutation(api.members.invite, { workspaceId: ws })) as { token: string };
+    const live = (await as(t, owner).mutation(api.members.invite, { workspaceId: ws })) as { token: string };
+    await t.run(async (ctx) => {
+      const row = await ctx.db.query("invites").withIndex("by_token", (q) => q.eq("token", old.token)).unique();
+      await ctx.db.patch(row!._id, { expiresAt: "2020-01-01T00:00:00.000Z", acceptedBy: owner.userId });
+    });
+    expect(await t.mutation(internal.members.purgeInvites, {})).toBe(1);
+    const left = await t.run(async (ctx) => (await ctx.db.query("invites").collect()).map((i) => i.token));
+    expect(left).toEqual([live.token]);
   });
 });
 

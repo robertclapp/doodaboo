@@ -27,7 +27,10 @@ same pages, components and routes serve both modes.
   deleted project's issues each get their own, grouped under the project),
   and while a row exists its id is reserved, so nothing new can take it and
   turn a later Undo into a silent no-op. An issue whose project was deleted
-  comes back with the project, not on its own.
+  comes back with the project, not on its own. One delete (and its Undo)
+  moves at most 3,000 issues or 5 MB; a larger project is refused with a
+  message saying so. Expired trash is purged daily in budgeted passes that
+  keep going until the backlog is gone.
 - **Concurrent edits** — a post's content and context travel as the
   changed sub-fields, and a task's labels and a project's members as
   additions and removals, merged into the server's current record. Two
@@ -127,12 +130,19 @@ Nothing but these two public URLs is baked into the client.
   who made it is still an owner: removing someone, their leaving, or their
   handing over ownership revokes the links they made, and the pending list
   shows who made each one. Someone who is already a member and opens a link
-  is just taken to the workspace; the link stays unused for its recipient.
+  is offered *Open* instead of *Join*; the link stays unused for its
+  recipient. A workspace can have at most 50 open links, and invites are
+  deleted once they expire. A link is a bearer credential: a removed member
+  who is handed a link someone else made can rejoin with it, so revoke
+  pending links you no longer want used.
   Owners can remove members (assignments are cleared), transfer ownership,
   and revoke invites. Everyone edits their own profile.
 - Settings: the Import and local Danger-zone actions become *Replace
-  content from a JSON export* (owner), *Leave workspace*, *Delete
-  workspace* (owner), and the device-level *Work locally* switch.
+  content from a JSON export* (owner; refused if the workspace already
+  holds more than 3 MB — import into a new workspace instead), *Leave
+  workspace*, *Delete workspace* (owner; access ends at once and the
+  content is cleared in the background), and the device-level *Work
+  locally* switch.
 - The HTTP API (`/api/*`) is disabled on a cloud-mode web deployment
   (503) except `/api/health`; `doodaboo serve` on loopback still works. The
   CLI and API are the local-vault surface.
